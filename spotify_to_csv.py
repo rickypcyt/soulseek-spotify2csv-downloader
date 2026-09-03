@@ -61,17 +61,18 @@ def fetch_tracks(sp, link_type, link_id):
 def write_csv(tracks, filename):
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["track_name", "artists", "album", "duration_ms", "spotify_url", "search_query"])
+        writer.writerow(["track_name", "artists", "album", "duration_ms", "spotify_url", "spotify_preview", "search_query"])
 
         for track in tracks:
             name = track.get("name", "")
-            artists = ", ".join(a["name"] for a in track.get("artists", []))
+            artists = " ".join(a["name"] for a in track.get("artists", []))
             album = track.get("album", {}).get("name", "") if isinstance(track.get("album"), dict) else ""
             duration = track.get("duration_ms", "")
             url = track.get("external_urls", {}).get("spotify", "")
-            search_query = f"{artists} - {name}".strip(" -")
+            preview = track.get("preview_url", "") or ""
+            search_query = f"{artists} {name}".strip()
 
-            writer.writerow([name, artists, album, duration, url, search_query])
+            writer.writerow([name, artists, album, duration, url, preview, search_query])
 
 
 def main():
@@ -107,7 +108,22 @@ def main():
 
     print(f"Descargando {link_type} {link_id}...")
     tracks = fetch_tracks(sp, link_type, link_id)
+
+    if link_type == "playlist":
+        name = sp.playlist(link_id).get("name", "")
+    elif link_type == "album":
+        name = sp.album(link_id).get("name", "")
+    elif link_type == "artist":
+        name = sp.artist(link_id).get("name", "")
+    else:
+        name = tracks[0].get("name", "") if tracks else ""
+
     write_csv(tracks, args.output)
+
+    name_file = os.path.splitext(args.output)[0] + "_playlist_name.txt"
+    with open(name_file, "w", encoding="utf-8") as f:
+        f.write(name)
+
     print(f"Listo: {args.output} con {len(tracks)} pista(s).")
 
 
