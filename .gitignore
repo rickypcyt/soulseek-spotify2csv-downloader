@@ -18,6 +18,8 @@ web_config.json
 
 slskd-*/
 slskr-*/
+slskr/
+soulseek_searches.txt
 vendor/
 .setup-cache/
 .cache

@@ -4,7 +4,6 @@ exclude = ["slskd-*", "slskr-*", "previews", "spotify-soulseek-web"]
 
 [tool.ruff.lint.per-file-ignores]
 "spotify_web.py" = ["BLE001", "S110", "DTZ005"]
-"spotify_gui.py" = ["BLE001"]
 "local_config.py" = ["BLE001", "S110"]
 
 [tool.pytest.ini_options]

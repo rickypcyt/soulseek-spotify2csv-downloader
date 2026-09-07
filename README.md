@@ -237,8 +237,8 @@ Python:
 
 ```powershell
 py -3.13 -m pytest
-py -3.13 -m ruff check backend_config.py local_config.py spotify_service.py spotify_to_csv.py spotify_gui.py spotify_web.py tests
-py -3.13 -m py_compile backend_config.py local_config.py spotify_service.py spotify_to_csv.py spotify_gui.py spotify_web.py
+py -3.13 -m ruff check backend_config.py local_config.py spotify_service.py spotify_to_csv.py spotify_web.py tests
+py -3.13 -m py_compile backend_config.py local_config.py spotify_service.py spotify_to_csv.py spotify_web.py
 ```
 
 PowerShell:
