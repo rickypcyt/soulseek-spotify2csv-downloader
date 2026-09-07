@@ -1,9 +1,9 @@
+import argparse
+import csv
+import logging
 import os
 import re
 import sys
-import csv
-import argparse
-import logging
 
 import spotipy
 

@@ -1,7 +1,6 @@
 import csv
 import glob
 import json
-import mimetypes
 import os
 import re
 import shutil
@@ -14,17 +13,19 @@ from urllib.parse import quote
 import requests
 from flask import Flask, abort, jsonify, request, send_file
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DIST_DIR = os.path.join(SCRIPT_DIR, "spotify-soulseek-web", "dist")
-RUN_PS1 = os.path.join(SCRIPT_DIR, "run.ps1")
-CSV_OUTPUT = os.path.join(SCRIPT_DIR, "web_output.csv")
-PLAYLIST_NAME_FILE = os.path.join(SCRIPT_DIR, "web_playlist_name.txt")
-PREVIEWS_DIR = os.path.join(SCRIPT_DIR, "previews")
-DOWNLOADS_DIR = os.getenv(
-    "SLSKD_DOWNLOADS_DIR",
-    os.path.join(os.path.expanduser("~"), "Music", "Soulseek Downloads"),
-)
-CONFIG_FILE = os.path.join(SCRIPT_DIR, "web_config.json")
+from backend_config import BackendSettings
+from local_config import LocalConfigStore
+from spotify_service import read_tracks, run_conversion
+
+SETTINGS = BackendSettings.from_environment()
+SCRIPT_DIR = str(SETTINGS.script_dir)
+DIST_DIR = str(SETTINGS.dist_dir)
+RUN_PS1 = str(SETTINGS.run_script)
+CSV_OUTPUT = str(SETTINGS.csv_output)
+PLAYLIST_NAME_FILE = str(SETTINGS.playlist_name_file)
+PREVIEWS_DIR = str(SETTINGS.previews_dir)
+DOWNLOADS_DIR = str(SETTINGS.downloads_dir)
+CONFIG_FILE = str(SETTINGS.config_file)
 
 
 def load_config():
@@ -62,19 +63,18 @@ def get_playlist_name():
         return ""
 
 
-app_config = load_config()
-current_downloads_dir = app_config.get("downloads_dir", DOWNLOADS_DIR)
+config_store = LocalConfigStore(SETTINGS.config_file)
+app_config = config_store.get()
+current_downloads_dir = app_config.get("downloads_dir") or DOWNLOADS_DIR
 
-SLSKR_URL = os.getenv("SLSKR_URL", "http://127.0.0.1:5030")
-SLSKR_TOKEN = os.getenv("SLSKR_API_TOKEN", "")
-
-SLSKD_URL = os.getenv("SLSKD_URL", "http://127.0.0.1:5030")
-SLSKD_KEY = os.getenv("SLSKD_API_KEY", "")
-USE_SLSKD = bool(SLSKD_KEY)
+SLSKD_URL = app_config.get("slskd_url") or SETTINGS.slskd_url
+SLSKD_KEY = config_store.get_secret("slskd_api_key")
+USE_SLSKD = True
+SLSKD_PROCESS = None
 
 app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 
-LOGS_FILE = os.path.join(SCRIPT_DIR, "web_logs.json")
+LOGS_FILE = str(SETTINGS.logs_file)
 
 
 def load_logs():
@@ -106,27 +106,22 @@ def add_log(msg):
 
 def fetch_csv(url):
     add_log(f"[spotify] Descargando: {url}")
-    cmd = [
-        "powershell",
-        "-ExecutionPolicy", "Bypass",
-        "-File", RUN_PS1,
-        "-Modo", "cli",
-        "-Url", url,
-        "-Output", CSV_OUTPUT,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.stdout:
-        add_log("[spotify] stdout:\n" + result.stdout)
-    if result.stderr:
-        add_log("[spotify] stderr:\n" + result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr or result.stdout or "Error desconocido")
+    runtime_config = config_store.get()
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "SPOTIPY_CLIENT_ID": runtime_config.get("spotify_client_id", ""),
+            "SPOTIPY_CLIENT_SECRET": config_store.get_secret("spotify_client_secret"),
+            "SPOTIPY_REDIRECT_URI": runtime_config.get("spotify_redirect_uri", ""),
+        }
+    )
+    output = run_conversion(RUN_PS1, url, CSV_OUTPUT, environment=environment)
     add_log("[spotify] Descarga finalizada")
+    return output
 
 
 def read_csv():
-    with open(CSV_OUTPUT, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
+    return read_tracks(CSV_OUTPUT)
 
 
 @app.route("/")
@@ -161,6 +156,47 @@ def api_logs():
 
 def _slskd_headers():
     return {"X-API-Key": SLSKD_KEY, "Content-Type": "application/json"}
+
+
+def _start_slskd_from_config():
+    global SLSKD_PROCESS
+    path = config_store.get().get("slskd_path", "")
+    if not path or not os.path.isfile(path):
+        return False
+    if SLSKD_PROCESS and SLSKD_PROCESS.poll() is None:
+        return True
+    os.makedirs(PREVIEWS_DIR, exist_ok=True)
+    incomplete_dir = os.path.join(PREVIEWS_DIR, ".incomplete")
+    os.makedirs(incomplete_dir, exist_ok=True)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "SLSKD_SLSK_USERNAME": config_store.get_secret("soulseek_username"),
+            "SLSKD_SLSK_PASSWORD": config_store.get_secret("soulseek_password"),
+            "SLSKD__WEB__HTTPS__DISABLED": "true",
+            "SLSKD_NO_HTTPS": "true",
+        }
+    )
+    SLSKD_PROCESS = subprocess.Popen(
+        [path, "--downloads", PREVIEWS_DIR, "--incomplete", incomplete_dir],
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    add_log("[slskd] Servicio iniciado desde la configuración local")
+    return True
+
+
+def _safe_join(base, relative):
+    """Resolve a relative path and reject paths outside base."""
+    base_path = os.path.abspath(base)
+    candidate = os.path.abspath(os.path.join(base_path, relative.lstrip("/\\")))
+    try:
+        if os.path.commonpath([base_path, candidate]) != os.path.commonpath([base_path]):
+            raise ValueError("Path fuera del directorio permitido")
+    except ValueError as exc:
+        raise ValueError("Path fuera del directorio permitido") from exc
+    return candidate
 
 
 def _normalize_slskd(data):
@@ -237,8 +273,9 @@ def _ensure_preview_clip(full_path):
             pass
 
 
+@app.route("/api/search_soulseek", methods=["POST"])
 @app.route("/api/search_slskr", methods=["POST"])
-def api_search_slskr():
+def api_search_soulseek():
     data = request.get_json() or {}
     query = data.get("query", "").strip()
     if not query:
@@ -275,46 +312,9 @@ def api_search_slskr():
             add_log(f"[slskd] Error de conexión: {e}")
             return jsonify({"error": f"Error de conexión: {e}"}), 500
 
-    if not SLSKR_TOKEN:
-        add_log("[slskr] Error: falta SLSKR_API_TOKEN")
-        return jsonify({"error": "Falta SLSKR_API_TOKEN"}), 400
-    add_log(f"[slskr] POST {SLSKR_URL}/api/v0/searches")
-    add_log(f"[slskr] query='{query}', target='global'")
-    try:
-        response = requests.post(
-            f"{SLSKR_URL}/api/v0/searches",
-            headers={
-                "Authorization": f"Bearer {SLSKR_TOKEN}",
-                "Content-Type": "application/json",
-            },
-            json={"query": query, "target": "global"},
-            timeout=10,
-        )
-        try:
-            data = response.json()
-            add_log(f"[slskr] {response.status_code}: {data}")
-            if not response.ok:
-                return jsonify({"error": f"Error {response.status_code}", "details": data}), response.status_code
-            search_id = data.get("searchId") or data.get("id") if isinstance(data, dict) else None
-            results = data.get("results", [])
-            return jsonify({
-                "searchId": search_id,
-                "query": query,
-                "resultsCount": len(results) if isinstance(results, list) else 0,
-            })
-        except Exception:
-            text = response.text
-            add_log(f"[slskr] {response.status_code}: {text[:500]}")
-            if response.ok:
-                return jsonify({"searchId": None, "query": query, "resultsCount": 0})
-            return jsonify({"error": f"Error {response.status_code}: {text[:500]}"}), response.status_code
-    except Exception as e:
-        add_log(f"[slskr] Error de conexión: {e}")
-        return jsonify({"error": f"Error de conexión: {e}"}), 500
-
-
+@app.route("/api/search_soulseek/<search_id>")
 @app.route("/api/search_slskr/<search_id>")
-def api_get_search_slskr(search_id):
+def api_get_search_soulseek(search_id):
     if USE_SLSKD:
         try:
             state_resp = requests.get(
@@ -324,7 +324,7 @@ def api_get_search_slskr(search_id):
             )
             if not state_resp.ok:
                 add_log(f"[slskd] GET state {state_resp.status_code}: searchId={search_id}")
-                return jsonify({"error": f"slskd {state_resp.status_code}", "status": "error"}), 200
+                return jsonify({"error": f"slskd {state_resp.status_code}", "status": "error"}), state_resp.status_code
             data = state_resp.json()
             # Los resultados reales están en el endpoint /responses
             try:
@@ -343,34 +343,6 @@ def api_get_search_slskr(search_id):
         except Exception as e:
             add_log(f"[slskd] Error de conexión: {e}")
             return jsonify({"error": f"Error de conexión: {e}", "status": "error"}), 200
-
-    if not SLSKR_TOKEN:
-        return jsonify({"error": "Falta SLSKR_API_TOKEN"}), 400
-    try:
-        # El endpoint correcto de slskr es /api/searches/{id} (sin v0)
-        response = requests.get(
-            f"{SLSKR_URL}/api/searches/{search_id}",
-            headers={"Authorization": f"Bearer {SLSKR_TOKEN}"},
-            timeout=10,
-        )
-        if response.status_code == 404:
-            add_log(f"[slskr] GET /api/searches/{search_id} dio 404, probando /api/v0/searches/{search_id}")
-            response = requests.get(
-                f"{SLSKR_URL}/api/v0/searches/{search_id}",
-                headers={"Authorization": f"Bearer {SLSKR_TOKEN}"},
-                timeout=10,
-            )
-        try:
-            data = response.json()
-            add_log(f"[slskr] GET data (searchId={search_id}): {str(data)[:800]}")
-            return jsonify(data)
-        except Exception:
-            text = response.text
-            add_log(f"[slskr] GET {response.status_code}: searchId={search_id}: {text[:300]}")
-            return response.text, response.status_code, {"Content-Type": "text/plain"}
-    except Exception as e:
-        add_log(f"[slskr] Error de conexión: {e}")
-        return jsonify({"error": f"Error de conexión: {e}"}), 500
 
 
 @app.route("/api/preview_audio", methods=["POST"])
@@ -393,7 +365,7 @@ def api_preview_audio():
         )
         add_log(f"[slskd] preview enqueue {response.status_code}: {response.text[:300]}")
         if not response.ok:
-            return jsonify({"error": f"slskd {response.status_code}", "status": "error"}), 200
+            return jsonify({"error": f"slskd {response.status_code}", "status": "error"}), response.status_code
         return jsonify({"ok": True})
     except Exception as e:
         add_log(f"[slskd] preview enqueue error: {e}")
@@ -460,8 +432,9 @@ def api_preview_stream():
     rel = request.args.get("path", "").strip()
     if not rel:
         abort(400)
-    full = os.path.abspath(os.path.join(PREVIEWS_DIR, rel))
-    if not full.startswith(os.path.abspath(PREVIEWS_DIR)):
+    try:
+        full = _safe_join(PREVIEWS_DIR, rel)
+    except ValueError:
         abort(403)
     if not os.path.exists(full):
         abort(404)
@@ -475,7 +448,32 @@ def api_preview_stream():
 
 @app.route("/api/config")
 def api_get_config():
-    return jsonify({"downloads_dir": current_downloads_dir})
+    data = config_store.get()
+    data["downloads_dir"] = current_downloads_dir
+    return jsonify(data)
+
+
+@app.route("/api/config", methods=["POST"])
+def api_update_config():
+    global current_downloads_dir, SLSKD_URL, SLSKD_KEY
+    data = request.get_json() or {}
+    try:
+        downloads_dir = str(data.get("downloads_dir", "")).strip()
+        if downloads_dir:
+            os.makedirs(downloads_dir, exist_ok=True)
+            if not os.path.isdir(downloads_dir):
+                return jsonify({"error": "No es un directorio válido"}), 400
+        saved = config_store.update(data)
+        current_downloads_dir = saved.get("downloads_dir") or current_downloads_dir
+        SLSKD_URL = saved.get("slskd_url") or SLSKD_URL
+        SLSKD_KEY = config_store.get_secret("slskd_api_key")
+        _start_slskd_from_config()
+        add_log("[config] Configuración actualizada desde la interfaz")
+        saved["downloads_dir"] = current_downloads_dir
+        return jsonify(saved)
+    except Exception as exc:
+        add_log(f"[config] Error al guardar configuración: {exc}")
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.route("/api/config/downloads", methods=["POST"])
@@ -490,8 +488,7 @@ def api_set_downloads_dir():
         if not os.path.isdir(new_dir):
             return jsonify({"error": "No es un directorio válido"}), 400
         current_downloads_dir = new_dir
-        app_config["downloads_dir"] = new_dir
-        save_config(app_config)
+        config_store.update({"downloads_dir": new_dir})
         add_log(f"[config] Carpeta de descargas: {new_dir}")
         return jsonify({"ok": True, "downloads_dir": new_dir})
     except Exception as e:
@@ -518,7 +515,7 @@ def api_download():
         )
         add_log(f"[slskd] download enqueue {response.status_code}: {response.text[:300]}")
         if not response.ok:
-            return jsonify({"error": f"slskd {response.status_code}", "status": "error"}), 200
+            return jsonify({"error": f"slskd {response.status_code}", "status": "error"}), response.status_code
         return jsonify({"ok": True})
     except Exception as e:
         add_log(f"[slskd] download enqueue error: {e}")
@@ -596,7 +593,7 @@ def api_cancel():
             timeout=10,
         )
         if not response.ok:
-            return jsonify({"error": f"slskd {response.status_code}"}), 200
+            return jsonify({"error": f"slskd {response.status_code}"}), response.status_code
         data = response.json()
         transfer_id = None
         for d in data.get("directories", []):
@@ -612,7 +609,7 @@ def api_cancel():
         cancel_resp = requests.delete(cancel_url, headers=_slskd_headers(), timeout=10)
         add_log(f"[slskd] cancel {username}/{transfer_id}: {cancel_resp.status_code}")
         if not cancel_resp.ok:
-            return jsonify({"error": f"slskd cancel {cancel_resp.status_code}"}), 200
+            return jsonify({"error": f"slskd cancel {cancel_resp.status_code}"}), cancel_resp.status_code
         return jsonify({"ok": True, "cancelled": True})
     except Exception as e:
         add_log(f"[slskd] cancel error: {e}")
@@ -634,8 +631,7 @@ def api_download_soulseek():
     with open(CSV_OUTPUT, newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
     with open(txt_path, "w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(row["search_query"] + "\n")
+        f.writelines(row["search_query"] + "\n" for row in rows)
     return send_file(txt_path, as_attachment=True, download_name="soulseek_searches.txt")
 
 
@@ -698,8 +694,9 @@ def api_delete():
         base = current_downloads_dir
     else:
         base = PREVIEWS_DIR
-    full = os.path.abspath(os.path.join(base, rel))
-    if not full.startswith(os.path.abspath(base)):
+    try:
+        full = _safe_join(base, rel)
+    except ValueError:
         return jsonify({"error": "Path inválido"}), 403
     try:
         if os.path.isdir(full):
@@ -718,7 +715,7 @@ def api_cleanup():
         if os.path.isdir(PREVIEWS_DIR):
             for root, _, names in os.walk(PREVIEWS_DIR):
                 for n in names:
-                    if n.endswith(".preview.mp3") or n.endswith(".processing") or n.endswith(".failed"):
+                    if n.endswith((".preview.mp3", ".processing", ".failed")):
                         continue
                     full = os.path.join(root, n)
                     try:
@@ -740,4 +737,6 @@ def api_cleanup():
 
 
 if __name__ == "__main__":
-    app.run(debug=False, host="127.0.0.1", port=5000)
+    dev_mode = os.getenv("SOULSEEK_DEV") == "1"
+    _start_slskd_from_config()
+    app.run(debug=dev_mode, use_reloader=dev_mode, host="127.0.0.1", port=5000)

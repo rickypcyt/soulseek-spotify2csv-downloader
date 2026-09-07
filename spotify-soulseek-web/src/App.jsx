@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { request, requestJson } from './api/client'
+import SettingsPanel from './components/SettingsPanel'
+import { extOf, pickBest } from './utils/resultPicker'
 
 const HISTORY_KEY = 'spotifyUrlHistory'
 
@@ -25,6 +28,14 @@ function loadHistory() {
 
 function saveHistory(history) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 20)))
+}
+
+function loadLastPlaylist() {
+  try {
+    return JSON.parse(localStorage.getItem('lastPlaylist') || 'null') || {}
+  } catch {
+    return {}
+  }
 }
 
 function formatDuration(ms) {
@@ -77,8 +88,9 @@ function Chip({ tone = 'neutral', children }) {
 }
 
 function App() {
-  const [url, setUrl] = useState('')
-  const [tracks, setTracks] = useState([])
+  const [initialPlaylist] = useState(loadLastPlaylist)
+  const [url, setUrl] = useState(() => initialPlaylist.url || '')
+  const [tracks, setTracks] = useState(() => initialPlaylist.tracks || [])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [logs, setLogs] = useState([])
@@ -86,20 +98,24 @@ function App() {
   const [searches, setSearches] = useState([])
   const [urlHistory, setUrlHistory] = useState(loadHistory)
   const [activePreview, setActivePreview] = useState(null)
-  const [activeDownload, setActiveDownload] = useState(null)
-  const [downloadsDir, setDownloadsDir] = useState('')
+  const [downloads, setDownloads] = useState({})
+  const [selected, setSelected] = useState(new Set())
+  const [pickMode, setPickMode] = useState('quality')
+  const [formatPref, setFormatPref] = useState('any')
+  const [config, setConfig] = useState({})
+  const [savingConfig, setSavingConfig] = useState(false)
   const [diagnostics, setDiagnostics] = useState(null)
   const previewTimer = useRef(null)
-  const downloadTimer = useRef(null)
+  const downloadTimers = useRef({})
   const logRef = useRef(null)
-  const autoSearchStarted = useRef(false)
+  const autoSearchStarted = useRef((initialPlaylist.tracks || []).length > 0)
   const autoSearchTimeouts = useRef([])
+  const searchesRef = useRef([])
+  const searchPollInFlight = useRef(false)
 
   const fetchLogs = async () => {
     try {
-      const r = await fetch('/api/logs')
-      const data = await r.json()
-      setLogs(data)
+      setLogs(await requestJson('/api/logs'))
       setBackendOnline(true)
     } catch {
       setBackendOnline(false)
@@ -108,15 +124,13 @@ function App() {
 
   const fetchDiagnostics = async () => {
     try {
-      const r = await fetch('/api/diagnostics')
-      const data = await r.json()
-      setDiagnostics(data)
+      setDiagnostics(await requestJson('/api/diagnostics'))
     } catch {}
   }
 
   const deleteItem = async (path, dir) => {
     try {
-      await fetch('/api/delete', {
+      await request('/api/delete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path, dir }),
@@ -128,14 +142,14 @@ function App() {
   const cleanupAll = async () => {
     if (!confirm('¿Borrar todos los temporales e incompletos?')) return
     try {
-      await fetch('/api/cleanup', { method: 'POST' })
+      await request('/api/cleanup', { method: 'POST' })
       fetchDiagnostics()
     } catch {}
   }
 
   const cancelTransfer = async (username, filename) => {
     try {
-      await fetch('/api/cancel', {
+      await request('/api/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, filename }),
@@ -145,26 +159,17 @@ function App() {
   }
 
   useEffect(() => {
+    const initialFetch = setTimeout(fetchLogs, 0)
     const iv = setInterval(fetchLogs, 5000)
-    fetchLogs()
-    return () => clearInterval(iv)
+    return () => {
+      clearTimeout(initialFetch)
+      clearInterval(iv)
+    }
   }, [])
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logs])
-
-  // Cargar última playlist guardada
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('lastPlaylist') || 'null')
-      if (saved) {
-        setUrl(saved.url || '')
-        setTracks(saved.tracks || [])
-        autoSearchStarted.current = true
-      }
-    } catch {}
-  }, [])
 
   // Guardar playlist actual cuando cambia
   useEffect(() => {
@@ -175,40 +180,47 @@ function App() {
 
   // Cargar carpeta de descargas
   useEffect(() => {
-    fetch('/api/config')
-      .then((r) => r.json())
-      .then((data) => setDownloadsDir(data.downloads_dir || ''))
+    requestJson('/api/config')
+      .then((data) => {
+        setConfig(data)
+      })
       .catch(() => {})
   }, [])
 
   // Cargar diagnósticos al inicio
   useEffect(() => {
-    fetchDiagnostics()
+    const initialFetch = setTimeout(fetchDiagnostics, 0)
     const iv = setInterval(fetchDiagnostics, 10000)
-    return () => clearInterval(iv)
+    return () => {
+      clearTimeout(initialFetch)
+      clearInterval(iv)
+    }
   }, [])
 
   useEffect(() => {
     return () => {
       autoSearchTimeouts.current.forEach(clearTimeout)
+      Object.values(downloadTimers.current).forEach(clearInterval)
     }
   }, [])
 
-  const saveDownloadsDir = async () => {
+  const saveConfig = async () => {
+    setSavingConfig(true)
     try {
-      const r = await fetch('/api/config/downloads', {
+      const data = { ...config }
+      for (const secret of ['spotify_client_secret', 'slskd_api_key', 'soulseek_password']) {
+        if (!data[secret]) delete data[secret]
+      }
+      const saved = await requestJson('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ downloads_dir: downloadsDir }),
+        body: JSON.stringify(data),
       })
-      const data = await r.json()
-      if (data.error) {
-        alert(data.error)
-      } else {
-        alert('Carpeta guardada: ' + data.downloads_dir)
-      }
+      setConfig(saved)
     } catch (err) {
-      alert('Error: ' + err.message)
+      alert('Error al guardar configuración: ' + err.message)
+    } finally {
+      setSavingConfig(false)
     }
   }
 
@@ -221,7 +233,7 @@ function App() {
     setSearches((prev) => prev.filter((s) => s.trackIndex !== i))
 
     try {
-      const r = await fetch('/api/search_slskr', {
+      const r = await request('/api/search_soulseek', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: q }),
@@ -238,7 +250,8 @@ function App() {
           trackIndex: i,
           query: data.query,
           resultsCount: data.resultsCount,
-          status: 'buscando',
+          status: data.status || 'buscando',
+          pollCount: 0,
           raw: null,
         },
       ])
@@ -264,35 +277,46 @@ function App() {
     }
   }, [tracks, autoSearchAll])
 
-  // Poll slskr searches
+  // Keep one stable polling loop for all Soulseek searches.
+  useEffect(() => {
+    searchesRef.current = searches
+  }, [searches])
+
   useEffect(() => {
     const poll = async () => {
-      const current = searches
+      if (searchPollInFlight.current || searchesRef.current.length === 0) return
+      searchPollInFlight.current = true
+      const current = searchesRef.current
       const updates = {}
-      await Promise.all(
-        current.map(async (s) => {
-          if (!s.searchId) return
-          try {
-            const r = await fetch(`/api/search_slskr/${s.searchId}`)
-            const data = await r.json()
-            const results = data.results || []
-            updates[s.searchId] = {
-              ...s,
-              raw: data,
-              resultsCount: data.resultsCount ?? (Array.isArray(results) ? results.length : 0),
-              status: data.status || s.status,
-            }
-          } catch {}
-        })
-      )
-      if (Object.keys(updates).length === 0) return
-      setSearches((prev) => prev.map((p) => (updates[p.searchId] ? updates[p.searchId] : p)))
+      try {
+        await Promise.all(
+          current.map(async (s) => {
+            if (!s.searchId) return
+            try {
+              const r = await request(`/api/search_soulseek/${s.searchId}`)
+              const data = await r.json()
+              const results = data.results || []
+              updates[s.searchId] = {
+                ...s,
+                raw: data,
+                pollCount: (s.pollCount || 0) + 1,
+                resultsCount: data.resultsCount ?? (Array.isArray(results) ? results.length : 0),
+                status: data.status || data.state || s.status,
+              }
+            } catch {}
+          })
+        )
+        if (Object.keys(updates).length > 0) {
+          setSearches((prev) => prev.map((p) => (updates[p.searchId] ? updates[p.searchId] : p)))
+        }
+      } finally {
+        searchPollInFlight.current = false
+      }
     }
-    if (searches.length === 0) return
-    poll()
+
     const iv = setInterval(poll, 3000)
     return () => clearInterval(iv)
-  }, [searches])
+  }, [])
 
   const preview = async (e) => {
     e.preventDefault()
@@ -302,16 +326,21 @@ function App() {
     setError('')
     setTracks([])
     setSearches([])
+    setDownloads({})
+    Object.values(downloadTimers.current).forEach(clearInterval)
+    downloadTimers.current = {}
     autoSearchStarted.current = false
     try {
-      const r = await fetch('/api/preview', {
+      const r = await request('/api/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url }),
       })
       const data = await r.json()
       if (!r.ok) throw new Error(data.error || 'Error')
-      setTracks(data.tracks || [])
+      const loaded = data.tracks || []
+      setTracks(loaded)
+      setSelected(new Set(loaded.map((_, i) => i)))
       if (url) {
         const next = [url, ...urlHistory.filter((u) => u !== url)]
         setUrlHistory(next)
@@ -328,9 +357,11 @@ function App() {
     navigator.clipboard.writeText(q).then(() => alert('Copiado: ' + q))
 
   const updateQuery = (i, newQuery) => {
-    const next = [...tracks]
-    next[i].search_query = newQuery
-    setTracks(next)
+    setTracks((prev) =>
+      prev.map((track, index) =>
+        index === i ? { ...track, search_query: newQuery } : track
+      )
+    )
   }
 
   const stopPreviewTimer = () => {
@@ -340,10 +371,10 @@ function App() {
     }
   }
 
-  const stopDownloadTimer = () => {
-    if (downloadTimer.current) {
-      clearInterval(downloadTimer.current)
-      downloadTimer.current = null
+  const stopDownloadTimer = (i) => {
+    if (downloadTimers.current[i]) {
+      clearInterval(downloadTimers.current[i])
+      delete downloadTimers.current[i]
     }
   }
 
@@ -371,25 +402,26 @@ function App() {
     return `${n.toFixed(1)} ${units[i]}`
   }
 
-  const startDownload = async (res) => {
-    if (
-      activeDownload &&
-      !activeDownload.error &&
-      !['completado', 'error'].includes(activeDownload.state)
-    ) {
-      return
-    }
-    stopDownloadTimer()
-    setActiveDownload({
-      username: res.username,
-      filename: res.filename,
-      size: res.size,
-      state: 'encolando',
-      path: null,
-      error: null,
-    })
+  const setDl = (i, patch) =>
+    setDownloads((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }))
+
+  const enqueueDownload = async (i, res) => {
+    if (!res) return
+    stopDownloadTimer(i)
+    setDownloads((prev) => ({
+      ...prev,
+      [i]: {
+        username: res.username,
+        filename: res.filename,
+        size: res.size,
+        state: 'encolando',
+        percent: 0,
+        path: null,
+        error: null,
+      },
+    }))
     try {
-      const r = await fetch('/api/download', {
+      const r = await request('/api/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -400,86 +432,77 @@ function App() {
       })
       const data = await r.json()
       if (data.error) {
-        setActiveDownload({
-          username: res.username,
-          filename: res.filename,
-          size: res.size,
-          state: 'error',
-          path: null,
-          error: data.error,
-        })
+        setDl(i, { state: 'error', error: data.error })
         return
       }
-      setActiveDownload({
-        username: res.username,
-        filename: res.filename,
-        size: res.size,
-        state: 'descargando',
-        path: null,
-        error: null,
-      })
-      downloadTimer.current = setInterval(async () => {
+      setDl(i, { state: 'descargando' })
+      downloadTimers.current[i] = setInterval(async () => {
         try {
-          const st = await fetch(
+          const st = await request(
             `/api/download/status?username=${encodeURIComponent(res.username)}&filename=${encodeURIComponent(res.filename)}`
           )
           const d = await st.json()
           if (d.path) {
-            stopDownloadTimer()
-            setActiveDownload({
-              username: res.username,
-              filename: res.filename,
-              size: res.size,
-              state: 'completado',
-              path: d.path,
-              error: null,
-            })
+            stopDownloadTimer(i)
+            setDl(i, { state: 'completado', path: d.path, percent: 100 })
           } else if (
             d.state === 'error' ||
             d.state === 'Errored' ||
             d.state === 'Cancelled'
           ) {
-            stopDownloadTimer()
-            setActiveDownload({
-              username: res.username,
-              filename: res.filename,
-              size: res.size,
-              state: 'error',
-              path: null,
-              error: d.state,
-            })
+            stopDownloadTimer(i)
+            setDl(i, { state: 'error', error: d.error || d.state })
+          } else {
+            setDl(i, { percent: d.percentComplete || 0 })
           }
         } catch {}
       }, 2000)
     } catch (err) {
-      setActiveDownload({
-        username: res.username,
-        filename: res.filename,
-        size: res.size,
-        state: 'error',
-        path: null,
-        error: err.message,
-      })
+      setDl(i, { state: 'error', error: err.message })
     }
   }
 
-  const cancelDownload = async (res) => {
-    stopDownloadTimer()
-    setActiveDownload(null)
+  const cancelTrackDownload = async (i) => {
+    const dl = downloads[i]
+    stopDownloadTimer(i)
+    setDownloads((prev) => {
+      const next = { ...prev }
+      delete next[i]
+      return next
+    })
+    if (!dl) return
     try {
-      await fetch('/api/cancel', {
+      await request('/api/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: res.username, filename: res.filename }),
+        body: JSON.stringify({ username: dl.username, filename: dl.filename }),
       })
     } catch {}
+  }
+
+  const toggleSelect = (i) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+
+  const downloadSelected = () => {
+    const list = tracks.map((_, i) => i).filter((i) => selected.has(i))
+    list.forEach((i, n) => {
+      const s = getTrackSearch(i)
+      const results = s?.raw?.results || []
+      const best = pickBest(results, pickMode, formatPref)
+      if (best) setTimeout(() => enqueueDownload(i, best), n * 400)
+    })
   }
 
   const cancelPreview = async (res) => {
     stopPreviewTimer()
     setActivePreview(null)
     try {
-      await fetch('/api/cancel', {
+      await request('/api/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: res.username, filename: res.filename }),
@@ -502,7 +525,7 @@ function App() {
       error: null,
     })
     try {
-      const r = await fetch('/api/preview_audio', {
+      const r = await request('/api/preview_audio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -535,7 +558,7 @@ function App() {
       })
       previewTimer.current = setInterval(async () => {
         try {
-          const st = await fetch(
+          const st = await request(
             `/api/preview/status?username=${encodeURIComponent(res.username)}&filename=${encodeURIComponent(res.filename)}`
           )
           const d = await st.json()
@@ -618,8 +641,19 @@ function App() {
       )
     }
 
+    const normalizedStatus = String(s.raw.status || s.raw.state || s.status || '').toLowerCase()
+    const terminalStatuses = new Set(['completed', 'complete', 'finished', 'failed', 'cancelled', 'canceled', 'error'])
+    const activeStatuses = new Set(['active', 'searching', 'inprogress', 'in_progress', 'pending', 'running', 'queued', 'started', 'buscando'])
+    const stillSearching =
+      !terminalStatuses.has(normalizedStatus) &&
+      (activeStatuses.has(normalizedStatus) || !normalizedStatus && (s.pollCount || 0) < 10)
+
     if (!Array.isArray(allResults) || allResults.length === 0) {
-      return (
+      return stillSearching ? (
+        <div className="py-2">
+          <Chip tone="amber">buscando resultados…</Chip>
+        </div>
+      ) : (
         <p className="py-2 text-xs text-[#8D93A6]">
           sin resultados
         </p>
@@ -628,16 +662,18 @@ function App() {
 
     const results = allResults.slice(0, limit)
     const isBusy =
-      (activePreview && !activePreview.error && activePreview.state !== 'completado') ||
-      (activeDownload && !activeDownload.error && activeDownload.state !== 'completado')
+      activePreview && !activePreview.error && activePreview.state !== 'completado'
+    const dl = downloads[s.trackIndex]
+    const dlActive = dl && !['completado', 'error'].includes(dl.state)
+    const bestPick = pickBest(allResults, pickMode, formatPref)
     const isThisPreview = (res) =>
       activePreview &&
       activePreview.username === res.username &&
       activePreview.filename === res.filename
     const isThisDownload = (res) =>
-      activeDownload &&
-      activeDownload.username === res.username &&
-      activeDownload.filename === res.filename
+      dl &&
+      dl.username === res.username &&
+      dl.filename === res.filename
 
     return (
       <div className="space-y-1.5">
@@ -652,11 +688,16 @@ function App() {
             style={{ animationDelay: `${i * 60}ms` }}
           >
             <p className="truncate text-[13px] text-[#E9EAF0]" title={res.filename}>
+              {res === bestPick && (
+                <span className="mr-1.5 rounded bg-[#FFFFFF] px-1 py-0.5 text-[9px] font-semibold text-[#161822]">
+                  pick
+                </span>
+              )}
               {res.filename || res.file || res.name || res.path || `Resultado ${i + 1}`}
             </p>
             <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
               {res.username && <span>@{res.username}</span>}
-              {res.extension && <span>{res.extension.toUpperCase()}</span>}
+              {extOf(res) && <span>{extOf(res).toUpperCase()}</span>}
               {res.size ? <span>{formatSize(res.size)}</span> : null}
               {res.speed ? <span>{formatSpeed(res.speed)}</span> : null}
               {res.bitrate ? <span>{Math.round(res.bitrate / 1000)} kbps</span> : null}
@@ -670,8 +711,8 @@ function App() {
                 Escuchar
               </button>
               <button
-                onClick={() => startDownload(res)}
-                disabled={isBusy}
+                onClick={() => enqueueDownload(s.trackIndex, res)}
+                disabled={isBusy || dlActive}
                 className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-2 py-1 text-[11px] font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Descargar
@@ -710,17 +751,19 @@ function App() {
             )}
             {isThisDownload(res) && (
               <div className="mt-2">
-                {activeDownload.state === 'encolando' && <Chip tone="amber">encolando</Chip>}
-                {activeDownload.state === 'descargando' && <Chip tone="amber">descargando</Chip>}
-                {activeDownload.state === 'completado' && activeDownload.path && (
-                  <Chip tone="teal">guardado · {activeDownload.path}</Chip>
+                {dl.state === 'encolando' && <Chip tone="amber">encolando</Chip>}
+                {dl.state === 'descargando' && (
+                  <Chip tone="amber">descargando {Math.round(dl.percent || 0)}%</Chip>
                 )}
-                {activeDownload.state === 'error' && (
-                  <Chip tone="coral">error · {activeDownload.error}</Chip>
+                {dl.state === 'completado' && dl.path && (
+                  <Chip tone="teal">guardado · {dl.path}</Chip>
                 )}
-                {activeDownload.state !== 'completado' && activeDownload.state !== 'error' && (
+                {dl.state === 'error' && (
+                  <Chip tone="coral">error · {dl.error}</Chip>
+                )}
+                {dl.state !== 'completado' && dl.state !== 'error' && (
                   <button
-                    onClick={() => cancelDownload(res)}
+                    onClick={() => cancelTrackDownload(s.trackIndex)}
                     className="ml-2 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
                   >
                     Cancelar
@@ -750,11 +793,20 @@ function App() {
         style={{ animationDelay: `${i * 40}ms` }}
       >
         <div className="flex items-start gap-3">
-          <div
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[#0D0F16] text-xs text-[#8D93A6]"
-            style={{ fontFamily: FONT_MONO }}
-          >
-            {String(i + 1).padStart(2, '0')}
+          <div className="flex shrink-0 flex-col items-center gap-1.5">
+            <input
+              type="checkbox"
+              checked={selected.has(i)}
+              onChange={() => toggleSelect(i)}
+              title="Seleccionar pista"
+              className="h-3.5 w-3.5 cursor-pointer accent-white"
+            />
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-md bg-[#0D0F16] text-xs text-[#8D93A6]"
+              style={{ fontFamily: FONT_MONO }}
+            >
+              {String(i + 1).padStart(2, '0')}
+            </div>
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-[15px] font-medium leading-tight text-[#E9EAF0]">
@@ -769,6 +821,21 @@ function App() {
             </p>
           </div>
         </div>
+
+        {downloads[i] && (
+          <div className="mt-2">
+            {downloads[i].state === 'encolando' && <Chip tone="amber">encolando</Chip>}
+            {downloads[i].state === 'descargando' && (
+              <Chip tone="amber">descargando {Math.round(downloads[i].percent || 0)}%</Chip>
+            )}
+            {downloads[i].state === 'completado' && (
+              <Chip tone="teal">guardado{downloads[i].path ? ` · ${downloads[i].path}` : ''}</Chip>
+            )}
+            {downloads[i].state === 'error' && (
+              <Chip tone="coral">error · {downloads[i].error}</Chip>
+            )}
+          </div>
+        )}
 
         {spotifyTrackId && (
           <div className="mt-3">
@@ -905,31 +972,12 @@ function App() {
           </div>
         )}
 
-        {/* carpeta de descargas */}
-        <div className="mb-6 flex flex-col gap-2 sm:flex-row">
-          <div className="relative flex-1">
-            <span
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8D93A6]"
-              style={{ fontFamily: FONT_MONO }}
-            >
-              out
-            </span>
-            <input
-              type="text"
-              value={downloadsDir}
-              onChange={(e) => setDownloadsDir(e.target.value)}
-              placeholder="C:\\Users\\...\\Music\\Descargas"
-              className="w-full rounded-md border border-[#2C303D] bg-[#161822] py-2 pl-11 pr-3 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
-              style={{ fontFamily: FONT_MONO }}
-            />
-          </div>
-          <button
-            onClick={saveDownloadsDir}
-            className="whitespace-nowrap rounded-md border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-4 py-2 text-sm font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20"
-          >
-            Guardar carpeta
-          </button>
-        </div>
+        <SettingsPanel
+          config={config}
+          onChange={setConfig}
+          onSave={saveConfig}
+          saving={savingConfig}
+        />
 
         {/* main grid: cards + monitor */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
@@ -937,10 +985,51 @@ function App() {
             {tracks.length > 0 ? (
               <>
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-sm text-[#8D93A6]">
-                    {tracks.length} pista{tracks.length === 1 ? '' : 's'} encontradas
-                  </h2>
+                  <label className="flex cursor-pointer items-center gap-2 text-sm text-[#8D93A6]">
+                    <input
+                      type="checkbox"
+                      checked={selected.size === tracks.length && tracks.length > 0}
+                      onChange={(e) =>
+                        setSelected(
+                          e.target.checked ? new Set(tracks.map((_, i) => i)) : new Set()
+                        )
+                      }
+                      className="h-3.5 w-3.5 cursor-pointer accent-white"
+                    />
+                    {selected.size} de {tracks.length} seleccionada
+                    {selected.size === 1 ? '' : 's'}
+                  </label>
                   <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={pickMode}
+                      onChange={(e) => setPickMode(e.target.value)}
+                      title="Criterio de elección"
+                      className="rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1 text-xs text-[#E9EAF0] outline-none"
+                    >
+                      <option value="quality">mejor calidad</option>
+                      <option value="speed">más rápido</option>
+                      <option value="longest">más largo</option>
+                      <option value="balanced">balanceado</option>
+                    </select>
+                    <select
+                      value={formatPref}
+                      onChange={(e) => setFormatPref(e.target.value)}
+                      title="Formato preferido"
+                      className="rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1 text-xs text-[#E9EAF0] outline-none"
+                    >
+                      <option value="any">cualquier formato</option>
+                      <option value="flac">FLAC</option>
+                      <option value="mp3">MP3</option>
+                      <option value="ogg">OGG</option>
+                      <option value="m4a">M4A</option>
+                    </select>
+                    <button
+                      onClick={downloadSelected}
+                      disabled={selected.size === 0}
+                      className="rounded bg-[#FFFFFF] px-2.5 py-1 text-xs font-medium text-[#161822] transition-colors hover:bg-[#f0b25c] disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      descargar seleccionadas
+                    </button>
                     <button
                       onClick={autoSearchAll}
                       className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-2.5 py-1 text-xs text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20"

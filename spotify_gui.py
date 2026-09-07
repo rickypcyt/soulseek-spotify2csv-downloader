@@ -1,9 +1,9 @@
 import csv
 import os
-import subprocess
 import tkinter as tk
 from tkinter import messagebox, ttk
 
+from spotify_service import run_conversion
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 RUN_PS1 = os.path.join(SCRIPT_DIR, "run.ps1")
@@ -11,18 +11,8 @@ CSV_OUTPUT = os.path.join(SCRIPT_DIR, "gui_output.csv")
 
 
 def run_spotify_to_csv(url):
-    """Ejecuta run.ps1 para descargar la playlist a un CSV temporal."""
-    cmd = [
-        "powershell",
-        "-ExecutionPolicy", "Bypass",
-        "-File", RUN_PS1,
-        "-Url", url,
-        "-Output", CSV_OUTPUT,
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr or result.stdout or "Error desconocido")
-    return CSV_OUTPUT
+    """Ejecuta el conversor de Spotify para descargar la playlist a un CSV temporal."""
+    return str(run_conversion(RUN_PS1, url, CSV_OUTPUT))
 
 
 def load_csv_into_tree(tree, filename):
