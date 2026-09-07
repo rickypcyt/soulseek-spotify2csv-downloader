@@ -20,3 +20,4 @@ slskd-*/
 slskr-*/
 vendor/
 .setup-cache/
+.cache
