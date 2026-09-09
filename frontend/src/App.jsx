@@ -788,7 +788,7 @@ function App() {
             <p className="truncate text-[13px] text-[#E9EAF0]" title={res.filename}>
               {res === bestPick && (
                 <span className="mr-1.5 rounded bg-[#FFFFFF] px-1 py-0.5 text-[9px] font-semibold text-[#161822]">
-                  pick
+                  Recomendado
                 </span>
               )}
               {res.filename || res.file || res.name || res.path || `Resultado ${i + 1}`}
