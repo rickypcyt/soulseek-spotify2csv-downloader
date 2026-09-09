@@ -23,16 +23,18 @@ class BackendSettings:
 
     @classmethod
     def from_environment(cls, script_dir: Path | None = None) -> "BackendSettings":
-        root = script_dir or Path(__file__).resolve().parent
+        # Keep all project-relative paths anchored at the repository root, not backend/.
+        root = script_dir or Path(__file__).resolve().parent.parent
         default_downloads = Path.home() / "Music" / "Soulseek Downloads"
+        downloads_dir = Path(os.getenv("SLSKD_DOWNLOADS_DIR") or default_downloads)
         return cls(
             script_dir=root,
-            dist_dir=root / "spotify-soulseek-web" / "dist",
+            dist_dir=root / "frontend" / "dist",
             run_script=root / "run.ps1",
             csv_output=root / "web_output.csv",
             playlist_name_file=root / "web_playlist_name.txt",
-            previews_dir=root / "previews",
-            downloads_dir=Path(os.getenv("SLSKD_DOWNLOADS_DIR") or default_downloads),
+            previews_dir=downloads_dir / "temp",
+            downloads_dir=downloads_dir,
             config_file=root / "web_config.json",
             logs_file=root / "web_logs.json",
             slskd_url=os.getenv("SLSKD_URL", "http://127.0.0.1:5030"),

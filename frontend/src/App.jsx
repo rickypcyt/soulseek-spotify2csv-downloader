@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { request, requestJson } from './api/client'
 import SettingsPanel from './components/SettingsPanel'
-import { extOf, pickBest } from './utils/resultPicker'
+import { extOf, pickBest, rankResults } from './utils/resultPicker'
 
 const HISTORY_KEY = 'spotifyUrlHistory'
 
@@ -28,6 +28,17 @@ function loadHistory() {
 
 function saveHistory(history) {
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 20)))
+}
+
+function getHistoryLabel(url, index) {
+  try {
+    const parsed = new URL(url)
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    const id = parts.at(-1)
+    return id ? `Playlist ${index + 1} · ${id}` : `Playlist guardada ${index + 1}`
+  } catch {
+    return `Playlist guardada ${index + 1}`
+  }
 }
 
 function loadLastPlaylist() {
@@ -87,6 +98,84 @@ function Chip({ tone = 'neutral', children }) {
   )
 }
 
+function StatusItem({ label, description, ready, pending = false }) {
+  const state = pending ? 'Pendiente' : ready ? 'Correcto' : 'Revisar'
+  const color = pending
+    ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
+    : ready
+      ? 'border-blue-400/40 bg-blue-400/10 text-blue-200'
+      : 'border-red-400/40 bg-red-400/10 text-red-200'
+  return (
+    <div className="rounded-lg border border-slate-600 bg-slate-900/40 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-slate-100">{label}</h3>
+          <p className="mt-1 text-sm leading-relaxed text-slate-300">{description}</p>
+        </div>
+        <span className={`shrink-0 rounded-full border px-3 py-1 text-sm font-semibold ${color}`}>{state}</span>
+      </div>
+    </div>
+  )
+}
+
+function ConfigurationStatus({ config, diagnostics, backendOnline }) {
+  const status = diagnostics?.configuration
+  const hasStatus = Boolean(status)
+  const spotifyReady = hasStatus
+    ? Boolean(status.spotify?.clientIdConfigured && status.spotify?.clientSecretConfigured)
+    : Boolean(config?.spotify_client_id && config?.spotify_client_secret_configured)
+  const slskdReady = hasStatus
+    ? Boolean(status.slskd?.reachable && status.slskd?.apiKeyConfigured)
+    : false
+  const downloadsReady = hasStatus
+    ? Boolean(status.downloads?.exists)
+    : Boolean(config?.downloads_dir)
+
+  return (
+    <section className="mb-8 rounded-xl border border-slate-600 bg-slate-800 p-5 sm:p-6">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100">Estado de la configuración</h2>
+          <p className="mt-1 text-sm leading-relaxed text-slate-300">
+            Aquí puedes confirmar rápidamente si todo está listo antes de buscar o descargar.
+          </p>
+        </div>
+        <span className={`rounded-full border px-3 py-1 text-sm font-semibold ${backendOnline ? 'border-blue-400/40 bg-blue-400/10 text-blue-200' : 'border-red-400/40 bg-red-400/10 text-red-200'}`}>
+          Backend: {backendOnline ? 'conectado' : 'sin respuesta'}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <StatusItem
+          label="Spotify"
+          description={spotifyReady ? 'Credenciales configuradas. Puedes cargar playlists.' : 'Falta el Client ID o Client Secret en la configuración.'}
+          ready={spotifyReady}
+          pending={!hasStatus}
+        />
+        <StatusItem
+          label="Soulseek / slskd"
+          description={slskdReady ? `Servicio conectado en ${status.slskd.url}.` : 'El servicio no responde o falta la API key. Revisa slskd.exe y su URL.'}
+          ready={slskdReady}
+          pending={!hasStatus}
+        />
+        <StatusItem
+          label="Carpeta de descargas"
+          description={downloadsReady ? (status?.downloads?.path || config?.downloads_dir) : 'La carpeta todavía no existe o no está configurada.'}
+          ready={downloadsReady}
+          pending={!hasStatus}
+        />
+      </div>
+      {status?.slskd && !status.slskd.reachable && (
+        <p className="mt-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm leading-relaxed text-amber-100">
+          Para habilitar las búsquedas, inicia slskd o configura la ruta de <strong>slskd.exe</strong> en Configuración local y guarda los cambios.
+        </p>
+      )}
+      {config?.slskd_path && status?.slskd && !status.slskd.executableExists && (
+        <p className="mt-3 text-sm text-red-200">La ruta configurada de slskd.exe no existe: {config.slskd_path}</p>
+      )}
+    </section>
+  )
+}
+
 function App() {
   const [initialPlaylist] = useState(loadLastPlaylist)
   const [url, setUrl] = useState(() => initialPlaylist.url || '')
@@ -96,6 +185,7 @@ function App() {
   const [logs, setLogs] = useState([])
   const [backendOnline, setBackendOnline] = useState(true)
   const [searches, setSearches] = useState([])
+  const [expandedSearches, setExpandedSearches] = useState(new Set())
   const [urlHistory, setUrlHistory] = useState(loadHistory)
   const [activePreview, setActivePreview] = useState(null)
   const [downloads, setDownloads] = useState({})
@@ -326,6 +416,7 @@ function App() {
     setError('')
     setTracks([])
     setSearches([])
+    setExpandedSearches(new Set())
     setDownloads({})
     Object.values(downloadTimers.current).forEach(clearInterval)
     downloadTimers.current = {}
@@ -492,7 +583,7 @@ function App() {
     const list = tracks.map((_, i) => i).filter((i) => selected.has(i))
     list.forEach((i, n) => {
       const s = getTrackSearch(i)
-      const results = s?.raw?.results || []
+      const results = rankResults(s?.raw?.results || [], s?.query)
       const best = pickBest(results, pickMode, formatPref)
       if (best) setTimeout(() => enqueueDownload(i, best), n * 400)
     })
@@ -574,16 +665,6 @@ function App() {
               path: d.path,
               error: null,
             })
-          } else if (d.state === 'procesando') {
-            setActivePreview({
-              username: res.username,
-              filename: res.filename,
-              size: res.size,
-              state: 'procesando',
-              percent,
-              path: null,
-              error: null,
-            })
           } else if (d.state === 'error' || d.state === 'Errored' || d.state === 'Cancelled') {
             stopPreviewTimer()
             setActivePreview({
@@ -620,6 +701,14 @@ function App() {
     }
   }
 
+  const toggleExpandedSearch = (searchId) =>
+    setExpandedSearches((prev) => {
+      const next = new Set(prev)
+      if (next.has(searchId)) next.delete(searchId)
+      else next.add(searchId)
+      return next
+    })
+
   const renderResults = (s, limit = RESULTS_PER_TRACK) => {
     if (!s.raw) {
       return (
@@ -628,8 +717,9 @@ function App() {
         </p>
       )
     }
-    const allResults = s.raw.results || []
-    const total = s.raw.resultsCount ?? allResults.length
+    const allResults = rankResults(s.raw.results || [], s.query)
+    const total = allResults.length
+    const expanded = expandedSearches.has(s.searchId)
 
     if (s.raw.error || s.raw.status === 'error') {
       return (
@@ -660,7 +750,7 @@ function App() {
       )
     }
 
-    const results = allResults.slice(0, limit)
+    const results = expanded ? allResults : allResults.slice(0, limit)
     const isBusy =
       activePreview && !activePreview.error && activePreview.state !== 'completado'
     const dl = downloads[s.trackIndex]
@@ -678,12 +768,20 @@ function App() {
     return (
       <div className="space-y-1.5">
         <p className="text-[11px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-          {results.length} de {total} resultado(s)
+          {results.length} de {total} resultado(s) únicos
           {total > results.length ? ` · +${total - results.length} más` : ''}
         </p>
+        {total > limit && (
+          <button
+            onClick={() => toggleExpandedSearch(s.searchId)}
+            className="mb-1 rounded border border-[#2C303D] px-2 py-1 text-[11px] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
+          >
+            {expanded ? 'mostrar menos' : `ver los ${total} resultados`}
+          </button>
+        )}
         {results.map((res, i) => (
           <div
-            key={i}
+            key={`${res.username || 'unknown'}|${res.filename || res.path || i}|${res.size || 0}`}
             className="fade-in rounded-md border border-[#2C303D] bg-[#0D0F16] p-2.5"
             style={{ animationDelay: `${i * 60}ms` }}
           >
@@ -722,7 +820,6 @@ function App() {
               <div className="mt-2">
                 {activePreview.state === 'encolando' && <Chip tone="amber">encolando</Chip>}
                 {activePreview.state === 'descargando' && <Chip tone="amber">cargando preview {Math.round(activePreview.percent || 0)}%</Chip>}
-                {activePreview.state === 'procesando' && <Chip tone="amber">generando clip 30s {Math.round(activePreview.percent || 0)}%</Chip>}
                 {activePreview.state === 'completado' && activePreview.path && (
                   <audio
                     controls
@@ -888,9 +985,9 @@ function App() {
       className="min-h-screen bg-[#10121A] text-[#E9EAF0]"
       style={{ fontFamily: FONT_BODY }}
     >
-      <div className="w-full px-5 py-6 sm:px-8 sm:py-8">
+      <div className="w-full px-5 py-8 sm:px-10 sm:py-10">
         {/* header / label plate */}
-        <header className="mb-8 flex flex-wrap items-center justify-between gap-3 border-b border-[#2C303D] pb-5">
+        <header className="mb-10 flex flex-wrap items-center justify-between gap-5 border-b border-slate-600 pb-6">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[#2C303D] bg-[#1A1D28]">
               <div className="h-2.5 w-2.5 rounded-sm bg-[#FFFFFF]" />
@@ -902,7 +999,7 @@ function App() {
               >
                 Spotify <span className="text-[#8D93A6]">&rarr;</span> Soulseek
               </h1>
-              <p className="text-xs text-[#8D93A6]">convierte una playlist en descargas P2P</p>
+              <p className="mt-1 text-sm text-slate-300">Carga una playlist, encuentra cada pista y descarga los archivos seleccionados.</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -910,16 +1007,22 @@ function App() {
               <StatusDot ok={backendOnline} />
               {backendOnline ? 'backend activo' : 'backend sin respuesta'}
             </div>
-            <a href="http://127.0.0.1:5030" target="_blank" rel="noreferrer">
-              <button className="rounded-md border border-[#2C303D] bg-[#1A1D28] px-3 py-1.5 text-xs text-[#8D93A6] transition-colors hover:border-[#3A3F4E] hover:text-[#E9EAF0]">
-                abrir slskd
-              </button>
-            </a>
+            <span
+              className="rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-300"
+              title="slskd se ejecuta en modo API y se controla desde esta aplicación"
+            >
+              slskd · API interna
+            </span>
           </div>
         </header>
 
         {/* input jack */}
-        <form onSubmit={preview} className="mb-2 flex flex-col gap-2 sm:flex-row">
+        <section className="mb-8 rounded-xl border border-slate-600 bg-slate-800 p-5 sm:p-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-semibold text-slate-100">1. Cargar playlist de Spotify</h2>
+            <p className="mt-1 text-sm leading-relaxed text-slate-300">Pega aquí el enlace de una playlist pública para importar sus canciones.</p>
+          </div>
+        <form onSubmit={preview} className="flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
             <span
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8D93A6]"
@@ -950,27 +1053,56 @@ function App() {
             {loading ? 'Cargando playlist…' : 'Cargar playlist'}
           </button>
         </form>
-
         {urlHistory.length > 0 && (
-          <div className="mb-6 flex items-center justify-between text-xs text-[#565C6E]">
-            <span style={{ fontFamily: FONT_MONO }}>{urlHistory.length} link(s) recientes</span>
-            <button
-              onClick={() => {
-                setUrlHistory([])
-                saveHistory([])
-              }}
-              className="text-[#8D93A6] underline decoration-dotted underline-offset-2 hover:text-[#E9EAF0]"
-            >
-              borrar historial
-            </button>
+          <div className="mt-5 border-t border-slate-600 pt-5">
+            <label className="block text-sm font-medium text-slate-200" htmlFor="saved-playlists">
+              Historial local de playlists
+            </label>
+            <p className="mt-1 text-sm leading-relaxed text-slate-300">
+              Selecciona una playlist guardada para volver a poner su enlace en la barra. Este historial vive en este navegador y usuario.
+            </p>
+            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+              <select
+                id="saved-playlists"
+                defaultValue=""
+                onChange={(event) => {
+                  if (event.target.value) setUrl(event.target.value)
+                }}
+                className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+              >
+                <option value="">Elegir una playlist guardada…</option>
+                {urlHistory.map((savedUrl, index) => (
+                  <option key={savedUrl} value={savedUrl}>
+                    {getHistoryLabel(savedUrl, index)} — {savedUrl}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setUrlHistory([])
+                  saveHistory([])
+                }}
+                className="shrink-0 text-sm text-slate-300 underline decoration-dotted underline-offset-2 hover:text-white"
+              >
+                Borrar historial ({urlHistory.length})
+              </button>
+            </div>
           </div>
         )}
+        </section>
 
         {error && (
           <div className="mb-6 rounded-md border border-[#6B7280]/30 bg-[#6B7280]/10 px-4 py-2.5 text-sm text-[#6B7280]">
             {error}
           </div>
         )}
+
+        <ConfigurationStatus
+          config={config}
+          diagnostics={diagnostics}
+          backendOnline={backendOnline}
+        />
 
         <SettingsPanel
           config={config}
@@ -980,7 +1112,11 @@ function App() {
         />
 
         {/* main grid: cards + monitor */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="mb-5">
+          <h2 className="text-xl font-semibold text-slate-100">2. Revisar y descargar canciones</h2>
+          <p className="mt-1 text-sm leading-relaxed text-slate-300">Selecciona pistas, busca versiones disponibles y elige escuchar o descargar cada resultado.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_380px]">
           <div className="min-w-0">
             {tracks.length > 0 ? (
               <>
@@ -1112,15 +1248,11 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {diagnostics.previews
-                      ?.filter((f) => !f.path.endsWith('.preview.mp3'))
-                      .length > 0 && (
+                    {diagnostics.previews?.length > 0 && (
                       <div>
                         <p className="mb-1 text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>previews</p>
                         <div className="space-y-1">
-                          {diagnostics.previews
-                            .filter((f) => !f.path.endsWith('.preview.mp3'))
-                            .map((f, i) => (
+                          {diagnostics.previews.map((f, i) => (
                               <div key={i} className="flex items-center gap-2">
                                 <span className="truncate text-[#E9EAF0]" title={f.path}>
                                   {f.path}
@@ -1139,7 +1271,7 @@ function App() {
                         </div>
                       </div>
                     )}
-                    {diagnostics.previews?.filter((f) => !f.path.endsWith('.preview.mp3')).length === 0 &&
+                    {diagnostics.previews?.length === 0 &&
                       diagnostics.transfers?.length === 0 && (
                         <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>sin temporales</p>
                       )}

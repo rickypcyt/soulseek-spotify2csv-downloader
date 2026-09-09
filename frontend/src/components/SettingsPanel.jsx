@@ -2,18 +2,21 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
   const update = (key, value) => onChange((current) => ({ ...current, [key]: value }))
 
   return (
-    <details className="mb-6 rounded-lg border border-[#2C303D] bg-[#161822]">
-      <summary className="cursor-pointer px-4 py-3 text-sm text-[#E9EAF0]">
-        configuración local
+    <details className="mb-8 rounded-xl border border-slate-600 bg-slate-800">
+      <summary className="cursor-pointer px-5 py-4 text-base font-semibold text-slate-100">
+        Configuración local
       </summary>
       <form
-        className="grid grid-cols-1 gap-3 border-t border-[#2C303D] p-4 sm:grid-cols-2"
+        className="grid grid-cols-1 gap-5 border-t border-slate-600 p-5 sm:grid-cols-2"
         onSubmit={(event) => {
           event.preventDefault()
           onSave()
         }}
       >
-        <label className="text-xs text-[#8D93A6]">
+        <p className="sm:col-span-2 text-sm leading-relaxed text-slate-300">
+          Completa estos datos una sola vez para conectar Spotify y Soulseek. Los campos secretos se guardan de forma segura y no se vuelven a mostrar.
+        </p>
+        <label className="text-sm font-medium text-slate-200">
           Spotify Client ID
           <input
             value={config.spotify_client_id || ''}
@@ -21,7 +24,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6]">
+        <label className="text-sm font-medium text-slate-200">
           Spotify Client Secret
           <input
             type="password"
@@ -31,7 +34,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6]">
+        <label className="text-sm font-medium text-slate-200">
           URL de slskd
           <input
             value={config.slskd_url || ''}
@@ -39,7 +42,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6]">
+        <label className="text-sm font-medium text-slate-200">
           API key de slskd
           <input
             type="password"
@@ -49,7 +52,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6]">
+        <label className="text-sm font-medium text-slate-200">
           Usuario Soulseek
           <input
             value={config.soulseek_username || ''}
@@ -57,7 +60,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6]">
+        <label className="text-sm font-medium text-slate-200">
           Contraseña Soulseek
           <input
             type="password"
@@ -67,7 +70,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6]">
+        <label className="text-sm font-medium text-slate-200">
           Ruta de slskd.exe
           <input
             value={config.slskd_path || ''}
@@ -76,7 +79,7 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <label className="text-xs text-[#8D93A6] sm:col-span-2">
+        <label className="text-sm font-medium text-slate-200 sm:col-span-2">
           Carpeta de descargas
           <input
             value={config.downloads_dir || ''}
@@ -85,8 +88,8 @@ export default function SettingsPanel({ config, onChange, onSave, saving }) {
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
-        <div className="flex items-center justify-between sm:col-span-2">
-          <p className="text-[11px] text-[#565C6E]">
+        <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between sm:col-span-2">
+          <p className="text-sm leading-relaxed text-slate-300">
             Los secretos se guardan en el almacén seguro del sistema y nunca se muestran otra vez.
           </p>
           <button

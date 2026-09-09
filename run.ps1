@@ -1,10 +1,11 @@
 [CmdletBinding()]
 param()
 
-$EnvFile = if (Test-Path "$PSScriptRoot\.env.local") {
-    "$PSScriptRoot\.env.local"
+$Root = $PSScriptRoot
+$EnvFile = if (Test-Path (Join-Path $Root ".env.local")) {
+    Join-Path $Root ".env.local"
 } else {
-    "$PSScriptRoot\.env"
+    Join-Path $Root ".env"
 }
 
 # Variables de entorno opcionales para migración y compatibilidad.
@@ -21,14 +22,9 @@ if (Test-Path $EnvFile) {
     }
 }
 
-$PreviewsDir = "$PSScriptRoot\previews"
-$IncompleteDir = "$PSScriptRoot\previews\.incomplete"
-New-Item -ItemType Directory -Path $PreviewsDir -Force | Out-Null
-New-Item -ItemType Directory -Path $IncompleteDir -Force | Out-Null
-
-if (Test-Path "$PSScriptRoot\spotify-soulseek-web") {
+if (Test-Path (Join-Path $Root "frontend")) {
     Write-Host "Build React..."
-    Push-Location "$PSScriptRoot\spotify-soulseek-web"
+    Push-Location (Join-Path $Root "frontend")
     try {
         npm run build
         if ($LASTEXITCODE -ne 0) {
@@ -40,5 +36,11 @@ if (Test-Path "$PSScriptRoot\spotify-soulseek-web") {
 }
 
 # La configuración de Spotify y Soulseek se introduce desde la interfaz web.
-py -3.13 "$PSScriptRoot\spotify_web.py"
-exit $LASTEXITCODE
+Push-Location $Root
+try {
+    py -3.13 -m backend.spotify_web
+    $ExitCode = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+exit $ExitCode

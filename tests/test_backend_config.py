@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from backend_config import BackendSettings
+from backend.backend_config import BackendSettings
 
 
 def test_backend_settings_use_explicit_script_dir(monkeypatch, tmp_path):
@@ -10,5 +10,6 @@ def test_backend_settings_use_explicit_script_dir(monkeypatch, tmp_path):
 
     assert settings.script_dir == Path("C:/project")
     assert settings.downloads_dir == tmp_path / "downloads"
+    assert settings.previews_dir == tmp_path / "downloads" / "temp"
     assert settings.use_slskd is True
-    assert settings.dist_dir == Path("C:/project/spotify-soulseek-web/dist")
+    assert settings.dist_dir == Path("C:/project/frontend/dist")

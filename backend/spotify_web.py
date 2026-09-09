@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import uuid
 from collections import deque
 from datetime import datetime
@@ -13,9 +14,9 @@ from urllib.parse import quote
 import requests
 from flask import Flask, abort, jsonify, request, send_file
 
-from backend_config import BackendSettings
-from local_config import LocalConfigStore
-from spotify_service import read_tracks, run_conversion
+from backend.backend_config import BackendSettings
+from backend.local_config import LocalConfigStore
+from backend.spotify_service import read_tracks, run_conversion
 
 SETTINGS = BackendSettings.from_environment()
 SCRIPT_DIR = str(SETTINGS.script_dir)
@@ -23,7 +24,6 @@ DIST_DIR = str(SETTINGS.dist_dir)
 RUN_PS1 = str(SETTINGS.run_script)
 CSV_OUTPUT = str(SETTINGS.csv_output)
 PLAYLIST_NAME_FILE = str(SETTINGS.playlist_name_file)
-PREVIEWS_DIR = str(SETTINGS.previews_dir)
 DOWNLOADS_DIR = str(SETTINGS.downloads_dir)
 CONFIG_FILE = str(SETTINGS.config_file)
 
@@ -66,6 +66,7 @@ def get_playlist_name():
 config_store = LocalConfigStore(SETTINGS.config_file)
 app_config = config_store.get()
 current_downloads_dir = app_config.get("downloads_dir") or DOWNLOADS_DIR
+PREVIEWS_DIR = os.path.join(current_downloads_dir, "temp")
 
 SLSKD_URL = app_config.get("slskd_url") or SETTINGS.slskd_url
 SLSKD_KEY = config_store.get_secret("slskd_api_key")
@@ -128,7 +129,7 @@ def read_csv():
 def index():
     index_html = os.path.join(DIST_DIR, "index.html")
     if not os.path.exists(index_html):
-        return "No se encontro el build de React. Corre 'npm run build' en spotify-soulseek-web/", 404
+        return "No se encontro el build de React. Corre 'npm run build' en frontend/", 404
     return send_file(index_html)
 
 
@@ -167,24 +168,71 @@ def _start_slskd_from_config():
         return True
     os.makedirs(PREVIEWS_DIR, exist_ok=True)
     incomplete_dir = os.path.join(PREVIEWS_DIR, ".incomplete")
+    webroot_dir = os.path.join(os.path.dirname(path), "wwwroot")
     os.makedirs(incomplete_dir, exist_ok=True)
+    os.makedirs(webroot_dir, exist_ok=True)
     environment = os.environ.copy()
     environment.update(
         {
             "SLSKD_SLSK_USERNAME": config_store.get_secret("soulseek_username"),
             "SLSKD_SLSK_PASSWORD": config_store.get_secret("soulseek_password"),
             "SLSKD__WEB__HTTPS__DISABLED": "true",
+            "SLSKD__WEB__CONTENT_PATH": webroot_dir,
             "SLSKD_NO_HTTPS": "true",
         }
     )
     SLSKD_PROCESS = subprocess.Popen(
-        [path, "--downloads", PREVIEWS_DIR, "--incomplete", incomplete_dir],
+        [path, "--headless", "--downloads", PREVIEWS_DIR, "--incomplete", incomplete_dir],
         env=environment,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     add_log("[slskd] Servicio iniciado desde la configuración local")
     return True
+
+
+def _ensure_slskd_available(wait_seconds=8):
+    """Start configured slskd and wait briefly for its HTTP API to listen."""
+    try:
+        started_or_running = _start_slskd_from_config()
+    except Exception as exc:
+        add_log(f"[slskd] No se pudo iniciar: {exc}")
+        return False
+
+    deadline = time.monotonic() + wait_seconds
+    while time.monotonic() < deadline:
+        try:
+            # Any HTTP response proves the service is listening; auth/status is
+            # handled by the actual API request afterward.
+            requests.get(SLSKD_URL, headers=_slskd_headers(), timeout=1)
+            return True
+        except requests.RequestException:
+            if started_or_running and SLSKD_PROCESS and SLSKD_PROCESS.poll() is not None:
+                add_log(f"[slskd] El proceso terminó durante el arranque (código {SLSKD_PROCESS.returncode})")
+                break
+            time.sleep(0.25)
+    return False
+
+
+def _slskd_reachable():
+    try:
+        requests.get(SLSKD_URL, headers=_slskd_headers(), timeout=1)
+        return True
+    except requests.RequestException:
+        return False
+
+
+def _slskd_unavailable_message():
+    configured_path = config_store.get().get("slskd_path", "")
+    if configured_path:
+        return (
+            f"No se pudo conectar con slskd en {SLSKD_URL}. "
+            "Verifica que slskd esté iniciado y que la URL/API key sean correctas."
+        )
+    return (
+        f"slskd no está disponible en {SLSKD_URL}. "
+        "Configura la ruta de slskd.exe en 'Configuración local' o inicia slskd manualmente."
+    )
 
 
 def _safe_join(base, relative):
@@ -217,60 +265,12 @@ def _normalize_slskd(data):
             })
     flat.sort(key=lambda x: x.get("speed", 0), reverse=True)
     data["resultsCount"] = len(flat)
-    data["results"] = flat[:15]
+    data["results"] = flat
     data["searchId"] = data.get("id")
     data["query"] = data.get("searchText")
     data["status"] = data.get("state") or data.get("status")
     data["responseCount"] = data.get("responseCount", 0)
     return data
-
-
-def _preview_clip_path(full_path):
-    return full_path + ".preview.mp3"
-
-
-def _ensure_preview_clip(full_path):
-    clip = _preview_clip_path(full_path)
-    failed = clip + ".failed"
-    if os.path.exists(clip):
-        return clip
-    if os.path.exists(failed):
-        return "failed"
-    processing = clip + ".processing"
-    if os.path.exists(processing):
-        return None  # todavía generando
-    try:
-        open(processing, "w").close()
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-loglevel",
-            "quiet",
-            "-i",
-            full_path,
-            "-ss",
-            "0",
-            "-t",
-            "30",
-            "-c:a",
-            "libmp3lame",
-            "-b:a",
-            "128k",
-            "-vn",
-            clip,
-        ]
-        subprocess.run(cmd, check=True, timeout=120)
-        add_log(f"[preview] clip generado: {clip}")
-        return clip
-    except Exception as e:
-        add_log(f"[preview] error ffmpeg: {e}")
-        open(failed, "w").close()
-        return "failed"
-    finally:
-        try:
-            os.remove(processing)
-        except Exception:
-            pass
 
 
 @app.route("/api/search_soulseek", methods=["POST"])
@@ -285,6 +285,10 @@ def api_search_soulseek():
     if USE_SLSKD:
         add_log(f"[slskd] POST {SLSKD_URL}/api/v0/searches")
         add_log(f"[slskd] searchText='{query}'")
+        if not _ensure_slskd_available():
+            message = _slskd_unavailable_message()
+            add_log(f"[slskd] {message}")
+            return jsonify({"error": message, "status": "unavailable"}), 503
         try:
             search_id = str(uuid.uuid4())
             response = requests.post(
@@ -403,19 +407,7 @@ def api_preview_status():
         matches = glob.glob(os.path.join(PREVIEWS_DIR, "**", glob.escape(base)), recursive=True)
         if matches:
             latest = max(matches, key=os.path.getmtime)
-            clip = _ensure_preview_clip(latest)
-            if clip is None:
-                return jsonify({
-                    "state": "procesando",
-                    "percentComplete": percent_complete,
-                })
-            if clip == "failed":
-                return jsonify({
-                    "state": "error",
-                    "error": "No se pudo generar el preview (ffmpeg)",
-                    "percentComplete": percent_complete,
-                })
-            rel = os.path.relpath(clip, PREVIEWS_DIR).replace("\\", "/")
+            rel = os.path.relpath(latest, PREVIEWS_DIR).replace("\\", "/")
             return jsonify({
                 "state": "Completed",
                 "path": rel,
@@ -455,7 +447,7 @@ def api_get_config():
 
 @app.route("/api/config", methods=["POST"])
 def api_update_config():
-    global current_downloads_dir, SLSKD_URL, SLSKD_KEY
+    global current_downloads_dir, PREVIEWS_DIR, SLSKD_URL, SLSKD_KEY
     data = request.get_json() or {}
     try:
         downloads_dir = str(data.get("downloads_dir", "")).strip()
@@ -465,6 +457,7 @@ def api_update_config():
                 return jsonify({"error": "No es un directorio válido"}), 400
         saved = config_store.update(data)
         current_downloads_dir = saved.get("downloads_dir") or current_downloads_dir
+        PREVIEWS_DIR = os.path.join(current_downloads_dir, "temp")
         SLSKD_URL = saved.get("slskd_url") or SLSKD_URL
         SLSKD_KEY = config_store.get_secret("slskd_api_key")
         _start_slskd_from_config()
@@ -478,7 +471,7 @@ def api_update_config():
 
 @app.route("/api/config/downloads", methods=["POST"])
 def api_set_downloads_dir():
-    global current_downloads_dir
+    global current_downloads_dir, PREVIEWS_DIR
     data = request.get_json() or {}
     new_dir = data.get("downloads_dir", "").strip()
     if not new_dir:
@@ -488,6 +481,7 @@ def api_set_downloads_dir():
         if not os.path.isdir(new_dir):
             return jsonify({"error": "No es un directorio válido"}), 400
         current_downloads_dir = new_dir
+        PREVIEWS_DIR = os.path.join(new_dir, "temp")
         config_store.update({"downloads_dir": new_dir})
         add_log(f"[config] Carpeta de descargas: {new_dir}")
         return jsonify({"ok": True, "downloads_dir": new_dir})
@@ -678,7 +672,32 @@ def api_diagnostics():
                                 })
             except Exception as e:
                 add_log(f"[diagnostics] error slskd: {e}")
-        return jsonify({"previews": files, "downloads": downloads_files, "transfers": transfers})
+        current_config = config_store.get()
+        slskd_path = current_config.get("slskd_path", "")
+        downloads_dir = current_downloads_dir
+        return jsonify({
+            "previews": files,
+            "downloads": downloads_files,
+            "transfers": transfers,
+            "configuration": {
+                "backend": {"ready": True},
+                "spotify": {
+                    "clientIdConfigured": bool(current_config.get("spotify_client_id")),
+                    "clientSecretConfigured": bool(current_config.get("spotify_client_secret_configured")),
+                },
+                "slskd": {
+                    "url": SLSKD_URL,
+                    "reachable": _slskd_reachable(),
+                    "apiKeyConfigured": bool(current_config.get("slskd_api_key_configured")),
+                    "executableConfigured": bool(slskd_path),
+                    "executableExists": bool(slskd_path and os.path.isfile(slskd_path)),
+                },
+                "downloads": {
+                    "path": downloads_dir,
+                    "exists": bool(downloads_dir and os.path.isdir(downloads_dir)),
+                },
+            },
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -715,7 +734,7 @@ def api_cleanup():
         if os.path.isdir(PREVIEWS_DIR):
             for root, _, names in os.walk(PREVIEWS_DIR):
                 for n in names:
-                    if n.endswith((".preview.mp3", ".processing", ".failed")):
+                    if n.endswith((".processing", ".failed")):
                         continue
                     full = os.path.join(root, n)
                     try:

@@ -2,8 +2,103 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --ui-bg: #111827;
+  --ui-surface: #1f2937;
+  --ui-surface-raised: #273449;
+  --ui-border: #475569;
+  --ui-border-strong: #64748b;
+  --ui-text: #f1f5f9;
+  --ui-muted: #cbd5e1;
+  --ui-subtle: #94a3b8;
+  --ui-blue: #3b82f6;
+  --ui-blue-hover: #60a5fa;
+  --ui-blue-soft: rgba(59, 130, 246, 0.16);
+}
+
 body {
-  @apply bg-black text-white;
+  margin: 0;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-size: 16px;
+}
+
+/* Shared controls: one readable scale across the whole application. */
+button,
+select,
+input {
+  font-size: 0.95rem;
+}
+
+button {
+  min-height: 44px;
+  border-color: var(--ui-border) !important;
+  border-radius: 0.5rem;
+  background-color: var(--ui-surface) !important;
+  color: var(--ui-text) !important;
+  padding: 0.65rem 1rem;
+  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--ui-blue) !important;
+  background-color: var(--ui-blue-soft) !important;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+select {
+  min-height: 44px;
+  border-color: var(--ui-border) !important;
+  background-color: var(--ui-surface) !important;
+  color: var(--ui-text) !important;
+}
+
+input::placeholder {
+  color: var(--ui-subtle);
+}
+
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 3px solid rgba(96, 165, 250, 0.35);
+  outline-offset: 2px;
+}
+
+label {
+  line-height: 1.45;
+}
+
+/* Keep utility-sized labels readable without changing compact metadata. */
+button.text-xs,
+button.text-\[11px\],
+button.text-\[10px\],
+select.text-xs {
+  font-size: 0.9rem !important;
+}
+
+.text-xs {
+  font-size: 0.875rem !important;
+}
+
+.text-\[11px\],
+.text-\[10px\] {
+  font-size: 0.8rem !important;
+}
+
+@media (max-width: 640px) {
+  body {
+    font-size: 15px;
+  }
 }
 
 @keyframes fadeIn {

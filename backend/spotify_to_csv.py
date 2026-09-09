@@ -8,7 +8,48 @@ import sys
 import spotipy
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
-from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
+from spotipy.oauth2 import (
+    RequestHandler,
+    SpotifyClientCredentials,
+    SpotifyOAuth,
+    start_local_http_server,
+)
+
+
+class CloseableCallbackHandler(RequestHandler):
+    """Render a callback page that can close itself when the browser allows it."""
+
+    def _write(self, text):
+        text = text.replace(
+            "window.close()",
+            "window.open('', '_self'); window.close()",
+        ).replace(
+            "This window can be closed.",
+            "Si esta pestaña no se cierra automáticamente, puedes cerrarla de forma segura.",
+        ).replace(
+            "Close Window",
+            "Cerrar ventana",
+        )
+        return super()._write(text)
+
+
+class LocalSpotifyOAuth(SpotifyOAuth):
+    """Use the improved callback page without modifying the spotipy package."""
+
+    def _get_auth_response_local_server(self, redirect_port):
+        server = start_local_http_server(redirect_port, handler=CloseableCallbackHandler)
+        self._open_auth_url()
+        server.handle_request()
+
+        if server.error is not None:
+            raise server.error
+        if self.state is not None and server.state != self.state:
+            from spotipy.oauth2 import SpotifyStateError
+
+            raise SpotifyStateError(self.state, server.state)
+        if server.auth_code is not None:
+            return server.auth_code
+        raise RuntimeError("El servidor local de Spotify no recibió la respuesta de autenticación.")
 
 
 def parse_spotify_id(url):
@@ -94,7 +135,7 @@ def main():
 
     if link_type == "playlist":
         redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8080/callback")
-        auth_manager = SpotifyOAuth(
+        auth_manager = LocalSpotifyOAuth(
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_uri,

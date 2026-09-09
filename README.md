@@ -25,7 +25,6 @@ Instala estas herramientas antes de comenzar:
 - PowerShell 5 o superior.
 - Python 3.13.
 - Node.js LTS con npm.
-- `ffmpeg` disponible en el `PATH` si quieres generar previews.
 - `slskd.exe` si usarás `slskd` como proveedor Soulseek.
 - Una cuenta de Spotify Developer para obtener Client ID y Client Secret.
 
@@ -127,6 +126,8 @@ Después completa:
 
 Pulsa **guardar configuración**. El backend intentará iniciar el proveedor seleccionado.
 
+Los archivos usados para previews se guardan temporalmente en una subcarpeta `temp` dentro de la carpeta de descargas configurada, por ejemplo `C:\Users\tu_usuario\Music\Soulseek Downloads\temp`. Así no se mezclan con el código del proyecto y se pueden eliminar desde la interfaz o manualmente.
+
 ### Seguridad de las credenciales
 
 - Los secretos no se guardan en `localStorage` del navegador.
@@ -150,10 +151,10 @@ Pulsa **guardar configuración**. El backend intentará iniciar el proveedor sel
 
 ### `bun run dev` dice `Script not found "dev"`
 
-El `package.json` del frontend está dentro de `spotify-soulseek-web`. Usa:
+El `package.json` del frontend está dentro de `frontend`. Usa:
 
 ```powershell
-cd spotify-soulseek-web
+cd frontend
 npm run dev
 ```
 
@@ -172,7 +173,7 @@ http://127.0.0.1:5000
 Desde la raíz ejecuta:
 
 ```powershell
-cd spotify-soulseek-web
+cd frontend
 npm run build
 cd ..
 .\run.ps1
@@ -203,7 +204,7 @@ Comprueba qué proceso usa el puerto 5000 o 5030. Detén la instancia anterior d
 Para trabajar sin reconstruir ni reiniciar manualmente el backend después de cada cambio, ejecuta desde la raíz:
 
 ```powershell
-.\dev.ps1
+.\scripts\dev.ps1
 ```
 
 Este comando inicia:
@@ -218,7 +219,7 @@ En desarrollo abre:
 http://127.0.0.1:5173
 ```
 
-Los cambios del frontend aparecen automáticamente. Los cambios del backend provocan una recarga automática de Flask. Para detener ambos servicios, pulsa `Ctrl+C` en la ventana de `dev.ps1`.
+Los cambios del frontend aparecen automáticamente. Los cambios del backend provocan una recarga automática de Flask. Para detener ambos servicios, pulsa `Ctrl+C` en la ventana de `scripts/dev.ps1`.
 
 El comando `.\run.ps1` continúa siendo el modo normal de ejecución, sirviendo el build de producción en `http://127.0.0.1:5000`.
 
@@ -227,7 +228,7 @@ El comando `.\run.ps1` continúa siendo el modo normal de ejecución, sirviendo 
 Frontend:
 
 ```powershell
-cd spotify-soulseek-web
+cd frontend
 npm run lint
 npm run build
 cd ..
@@ -237,8 +238,8 @@ Python:
 
 ```powershell
 py -3.13 -m pytest
-py -3.13 -m ruff check backend_config.py local_config.py spotify_service.py spotify_to_csv.py spotify_web.py tests
-py -3.13 -m py_compile backend_config.py local_config.py spotify_service.py spotify_to_csv.py spotify_web.py
+py -3.13 -m ruff check backend tests
+py -3.13 -m py_compile backend/backend_config.py backend/local_config.py backend/spotify_service.py backend/spotify_to_csv.py backend/spotify_web.py
 ```
 
 PowerShell:
@@ -247,6 +248,7 @@ PowerShell:
 $tokens=$null
 $errors=$null
 [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\run.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\setup.ps1), [ref]$tokens, [ref]$errors) | Out-Null
 $errors
 ```
 
@@ -254,15 +256,19 @@ $errors
 
 ```text
 .
-├── run.ps1                         # Arranque de la aplicación local
-├── spotify_web.py                  # Backend Flask y API
-├── backend_config.py               # Rutas y configuración del backend
-├── local_config.py                 # Configuración y secretos locales
-├── spotify_service.py              # Ejecución del conversor de Spotify
-├── spotify_to_csv.py               # Conversión Spotify → CSV
+├── backend/                        # Backend Flask y servicios Python
+│   ├── spotify_web.py              # API y aplicación Flask
+│   ├── backend_config.py           # Rutas y configuración
+│   ├── local_config.py             # Configuración y secretos locales
+│   ├── spotify_service.py           # Ejecución del conversor
+│   └── spotify_to_csv.py            # Conversión Spotify → CSV
+├── run.ps1                         # Arranque de la aplicación
+├── setup.ps1                       # Instalación inicial
+├── scripts/                        # Automatización PowerShell
+│   └── dev.ps1                     # Desarrollo con recarga
 ├── requirements.txt                # Dependencias Python
 ├── tests/                          # Tests Python
-└── spotify-soulseek-web/
+└── frontend/
     ├── src/
     │   ├── api/                    # Cliente HTTP del frontend
     │   ├── components/             # Componentes React

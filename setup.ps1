@@ -62,7 +62,7 @@ Write-Host "Instalando dependencias de Python..."
 py -3.13 -m pip install -r (Join-Path $Root "requirements.txt")
 
 Write-Host "Instalando dependencias del frontend..."
-Push-Location (Join-Path $Root "spotify-soulseek-web")
+Push-Location (Join-Path $Root "frontend")
 try {
     npm install
     if ($LASTEXITCODE -ne 0) { throw "Falló npm install." }
@@ -86,6 +86,8 @@ if (Test-Path $ConfigPath) {
 }
 $config["provider"] = "slskd"
 $config["slskd_path"] = $slskdPath
+# Algunas distribuciones API-only no incluyen el directorio web esperado por slskd.
+New-Item -ItemType Directory -Path (Join-Path (Split-Path $slskdPath) "wwwroot") -Force | Out-Null
 $config | ConvertTo-Json -Depth 5 | Set-Content -Path $ConfigPath -Encoding UTF8
 
 Write-Host ""

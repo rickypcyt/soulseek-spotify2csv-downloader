@@ -1,6 +1,6 @@
 import pytest
 
-from spotify_to_csv import parse_spotify_id
+from backend.spotify_to_csv import parse_spotify_id
 
 
 @pytest.mark.parametrize(

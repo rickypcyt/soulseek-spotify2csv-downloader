@@ -1,6 +1,6 @@
 from typing import ClassVar
 
-from local_config import LocalConfigStore
+from backend.local_config import LocalConfigStore
 
 
 class FakeKeyring:
@@ -16,7 +16,7 @@ class FakeKeyring:
 
 
 def test_local_config_keeps_secrets_out_of_public_json(tmp_path, monkeypatch):
-    import local_config
+    from backend import local_config
 
     monkeypatch.setattr(local_config, "keyring", FakeKeyring)
     store = LocalConfigStore(tmp_path / "config.json")

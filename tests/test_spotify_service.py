@@ -1,4 +1,4 @@
-from spotify_service import read_tracks
+from backend.spotify_service import read_tracks
 
 
 def test_read_tracks_accepts_string_path(tmp_path):
