@@ -72,6 +72,7 @@ SLSKD_URL = app_config.get("slskd_url") or SETTINGS.slskd_url
 SLSKD_KEY = config_store.get_secret("slskd_api_key")
 USE_SLSKD = True
 SLSKD_PROCESS = None
+PENDING_DOWNLOADS = set()
 
 app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 
@@ -510,6 +511,7 @@ def api_download():
         add_log(f"[slskd] download enqueue {response.status_code}: {response.text[:300]}")
         if not response.ok:
             return jsonify({"error": f"slskd {response.status_code}", "status": "error"}), response.status_code
+        PENDING_DOWNLOADS.add((username, filename))
         return jsonify({"ok": True})
     except Exception as e:
         add_log(f"[slskd] download enqueue error: {e}")
@@ -543,27 +545,43 @@ def api_download_status():
                     break
             if target_state != "Unknown":
                 break
+        if str(target_state).lower() not in {"completed", "complete", "succeeded", "finished"}:
+            return jsonify({"state": target_state, "percentComplete": percent_complete})
+        if (username, filename) not in PENDING_DOWNLOADS:
+            # Previews and other files remain in temp unless the user explicitly
+            # requested this file through the download action.
+            return jsonify({"state": target_state, "percentComplete": percent_complete})
+
         base = os.path.basename(filename.replace("\\", "/").replace("/", os.sep))
-        # buscar en previews y mover a descargas
+        # Buscar en temporales y mover el archivo terminado a la carpeta final.
         matches = glob.glob(os.path.join(PREVIEWS_DIR, "**", glob.escape(base)), recursive=True)
         if not matches:
-            # ya pudo haber sido movido
+            # Ya pudo haber sido movido a la carpeta final.
             matches = glob.glob(os.path.join(current_downloads_dir, "**", glob.escape(base)), recursive=True)
         if matches:
             latest = max(matches, key=os.path.getmtime)
+            latest_abs = os.path.abspath(latest)
+            previews_abs = os.path.abspath(PREVIEWS_DIR)
             target_dir = os.path.join(current_downloads_dir, _safe_dirname(get_playlist_name()))
-            if not latest.lower().startswith(current_downloads_dir.lower()):
+            is_in_previews = os.path.commonpath([latest_abs, previews_abs]) == previews_abs
+            if is_in_previews:
                 os.makedirs(target_dir, exist_ok=True)
                 dest = os.path.join(target_dir, base)
-                if not os.path.exists(dest):
-                    try:
+                try:
+                    if os.path.abspath(dest) == latest_abs:
+                        pass
+                    elif os.path.exists(dest):
+                        os.remove(latest)
+                        add_log(f"[slskd] temporal eliminado; ya existía {dest}")
+                    else:
                         shutil.move(latest, dest)
-                        latest = dest
                         add_log(f"[slskd] download moved to {dest}")
-                    except Exception as e:
-                        add_log(f"[slskd] download move error: {e}")
-                        return jsonify({"state": "error", "error": str(e), "saved": False})
+                    latest = dest
+                except Exception as e:
+                    add_log(f"[slskd] download move error: {e}")
+                    return jsonify({"state": "error", "error": str(e), "saved": False})
             rel = os.path.relpath(latest, current_downloads_dir).replace("\\", "/")
+            PENDING_DOWNLOADS.discard((username, filename))
             return jsonify({"state": "Completed", "path": rel, "saved": True, "percentComplete": 100})
         return jsonify({"state": target_state, "percentComplete": percent_complete})
     except Exception as e:
