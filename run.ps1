@@ -1,24 +1,38 @@
 [CmdletBinding()]
 param()
 
+$ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
-$EnvFile = if (Test-Path (Join-Path $Root ".env.local")) {
-    Join-Path $Root ".env.local"
-} else {
-    Join-Path $Root ".env"
+
+function Get-ConfiguredSlskdPath {
+    $configPath = Join-Path $Root "web_config.json"
+    if (-not (Test-Path $configPath)) { return $null }
+    try {
+        $config = Get-Content $configPath -Raw | ConvertFrom-Json
+        return [string]$config.slskd_path
+    } catch {
+        return $null
+    }
 }
 
-# Variables de entorno opcionales para migración y compatibilidad.
-if (Test-Path $EnvFile) {
-    Get-Content $EnvFile | ForEach-Object {
-        if ($_ -match "^([A-Z0-9_]+)=(.*)$") {
-            $name = $matches[1]
-            $value = $matches[2]
-            if ($value -match '^["\x27](.*)["\x27]$') {
-                $value = $matches[1]
-            }
-            [System.Environment]::SetEnvironmentVariable($name, $value, "Process")
-        }
+$needsSetup = $false
+if (-not (Test-Path (Join-Path $Root "frontend\node_modules"))) {
+    $needsSetup = $true
+}
+$slskdPath = Get-ConfiguredSlskdPath
+if (-not $slskdPath -or -not (Test-Path $slskdPath -PathType Leaf)) {
+    $needsSetup = $true
+}
+if (-not $needsSetup) {
+    py -3.13 -c "import flask, requests, spotipy, keyring" 2>$null
+    if ($LASTEXITCODE -ne 0) { $needsSetup = $true }
+}
+
+if ($needsSetup) {
+    Write-Host "Falta parte de la configuración. Ejecutando setup automáticamente..."
+    & (Join-Path $Root "setup.ps1")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Falló la configuración automática."
     }
 }
 

@@ -445,7 +445,6 @@ soulseek/
 
 Los siguientes elementos son locales o generados y no deben subirse al repositorio:
 
-- `.env.local`.
 - `web_config.json`.
 - `web_logs.json`.
 - `vendor/`.
@@ -460,7 +459,8 @@ Los siguientes elementos son locales o generados y no deben subirse al repositor
 - Los secretos se guardan en el almacén seguro del sistema mediante `keyring` cuando está disponible.
 - Los secretos no se guardan en `localStorage`.
 - La interfaz muestra `guardado`, pero nunca vuelve a mostrar Client Secrets, contraseñas o API keys.
-- No compartas `.env.local`, `web_config.json`, tokens, API keys ni contraseñas.
+- La configuración se introduce desde la interfaz; no es necesario editar archivos de variables de entorno.
+- No compartas `web_config.json`, tokens, API keys ni contraseñas.
 - No publiques los enlaces de callback de Spotify, porque pueden contener códigos temporales de autorización.
 - Revisa las normas de uso de Spotify y Soulseek para el contenido que descargues.
 

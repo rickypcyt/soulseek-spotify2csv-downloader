@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,7 +25,7 @@ class BackendSettings:
         # Keep all project-relative paths anchored at the repository root, not backend/.
         root = script_dir or Path(__file__).resolve().parent.parent
         default_downloads = Path.home() / "Music" / "Soulseek Downloads"
-        downloads_dir = Path(os.getenv("SLSKD_DOWNLOADS_DIR") or default_downloads)
+        downloads_dir = default_downloads
         return cls(
             script_dir=root,
             dist_dir=root / "frontend" / "dist",
@@ -37,6 +36,6 @@ class BackendSettings:
             downloads_dir=downloads_dir,
             config_file=root / "web_config.json",
             logs_file=root / "web_logs.json",
-            slskd_url=os.getenv("SLSKD_URL", "http://127.0.0.1:5030"),
-            slskd_key=os.getenv("SLSKD_API_KEY", ""),
+            slskd_url="http://127.0.0.1:5030",
+            slskd_key="",
         )

@@ -1,5 +1,6 @@
 import csv
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -13,8 +14,16 @@ def run_conversion(
     output: Path,
     environment: dict[str, str] | None = None,
 ) -> Path:
-    converter_script = Path(run_script).with_name("spotify_to_csv.py")
-    command = ["py", "-3.13", str(converter_script), url, "-o", str(output)]
+    root = Path(run_script).resolve().parent
+    candidates = (
+        root / "backend" / "spotify_to_csv.py",
+        root / "spotify_to_csv.py",
+        Path(__file__).with_name("spotify_to_csv.py"),
+    )
+    converter_script = next((path for path in candidates if path.is_file()), None)
+    if converter_script is None:
+        raise SpotifyServiceError("No se encontró backend/spotify_to_csv.py.")
+    command = [sys.executable, str(converter_script), url, "-o", str(output)]
     try:
         result = subprocess.run(
             command,

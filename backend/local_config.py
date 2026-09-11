@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +48,7 @@ class LocalConfigStore:
                     return value
             except Exception:
                 pass
-        return os.getenv(SECRET_NAMES.get(name, name.upper()), "")
+        return ""
 
     def _set_secret(self, name: str, value: str) -> None:
         if keyring is None:
@@ -59,16 +58,13 @@ class LocalConfigStore:
     def get(self) -> dict[str, Any]:
         public = self._read_public()
         result = {
-            "spotify_client_id": public.get("spotify_client_id", os.getenv("SPOTIPY_CLIENT_ID", "")),
-            "spotify_redirect_uri": public.get(
-                "spotify_redirect_uri",
-                os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8080/callback"),
-            ),
+            "spotify_client_id": public.get("spotify_client_id", ""),
+            "spotify_redirect_uri": public.get("spotify_redirect_uri", "http://127.0.0.1:8080/callback"),
             "provider": "slskd",
-            "slskd_url": public.get("slskd_url", os.getenv("SLSKD_URL", "http://127.0.0.1:5030")),
-            "soulseek_username": public.get("soulseek_username") or self._get_secret("soulseek_username") or os.getenv("SLSK_USERNAME", ""),
+            "slskd_url": public.get("slskd_url", "http://127.0.0.1:5030"),
+            "soulseek_username": self._get_secret("soulseek_username") or public.get("soulseek_username", ""),
             "downloads_dir": public.get("downloads_dir", ""),
-            "slskd_path": public.get("slskd_path", os.getenv("SLSKD_PATH", "")),
+            "slskd_path": public.get("slskd_path", ""),
         }
         for name in SECRET_NAMES:
             result[f"{name}_configured"] = bool(self._get_secret(name))
@@ -85,13 +81,13 @@ class LocalConfigStore:
             "spotify_client_id",
             "spotify_redirect_uri",
             "slskd_url",
-            "soulseek_username",
             "downloads_dir",
             "slskd_path",
         }
         for key in public_keys:
             if key in values and values[key] is not None:
                 public[key] = str(values[key]).strip()
+        public.pop("soulseek_username", None)
         self._write_public(public)
 
         for name in SECRET_NAMES:

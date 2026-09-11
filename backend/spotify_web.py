@@ -1,10 +1,13 @@
 import csv
 import glob
 import json
+import mimetypes
 import os
 import re
+import secrets
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from collections import deque
@@ -12,11 +15,13 @@ from datetime import datetime
 from urllib.parse import quote
 
 import requests
+import spotipy
 from flask import Flask, abort, jsonify, request, send_file
 
 from backend.backend_config import BackendSettings
 from backend.local_config import LocalConfigStore
 from backend.spotify_service import read_tracks, run_conversion
+from backend.spotify_to_csv import LocalSpotifyOAuth
 
 SETTINGS = BackendSettings.from_environment()
 SCRIPT_DIR = str(SETTINGS.script_dir)
@@ -63,6 +68,50 @@ def get_playlist_name():
         return ""
 
 
+def load_library_index():
+    index_path = os.path.join(SCRIPT_DIR, "web_library_index.json")
+    if not os.path.exists(index_path):
+        return {}
+    try:
+        with open(index_path, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_library_index(index):
+    index_path = os.path.join(SCRIPT_DIR, "web_library_index.json")
+    temporary = f"{index_path}.tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        json.dump(index, handle, ensure_ascii=False, indent=2)
+    os.replace(temporary, index_path)
+
+
+def register_library_track(track_key, track_name, artists, path):
+    if not track_key:
+        return
+    index = load_library_index()
+    index[str(track_key)] = {
+        "track_name": str(track_name or ""),
+        "artists": str(artists or ""),
+        "path": path,
+    }
+    save_library_index(index)
+
+
+def remove_library_paths(path):
+    index = load_library_index()
+    prefix = path.rstrip("/") + "/"
+    updated = {
+        key: value
+        for key, value in index.items()
+        if value.get("path") != path and not str(value.get("path", "")).startswith(prefix)
+    }
+    if updated != index:
+        save_library_index(updated)
+
+
 config_store = LocalConfigStore(SETTINGS.config_file)
 app_config = config_store.get()
 current_downloads_dir = app_config.get("downloads_dir") or DOWNLOADS_DIR
@@ -73,6 +122,16 @@ SLSKD_KEY = config_store.get_secret("slskd_api_key")
 USE_SLSKD = True
 SLSKD_PROCESS = None
 PENDING_DOWNLOADS = set()
+PENDING_DOWNLOAD_FOLDERS = {}
+PENDING_DOWNLOAD_METADATA = {}
+ACTIVE_SEARCH_IDS = set()
+ACTIVE_SEARCH_STARTED = {}
+MAX_SEARCH_QUERY_LENGTH = 200
+MAX_ACTIVE_SEARCHES = 50
+MAX_SEARCH_LIFETIME_SECONDS = 120
+SPOTIFY_AUTH_STATE = {"status": "not_configured", "error": None}
+SPOTIFY_AUTH_THREAD = None
+SPOTIFY_AUTH_LOCK = threading.Lock()
 
 app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 
@@ -127,6 +186,9 @@ def read_csv():
 
 
 @app.route("/")
+@app.route("/settings")
+@app.route("/logs")
+@app.route("/library")
 def index():
     index_html = os.path.join(DIST_DIR, "index.html")
     if not os.path.exists(index_html):
@@ -145,7 +207,7 @@ def api_preview():
         fetch_csv(url)
         tracks = read_csv()
         add_log(f"[web] {len(tracks)} pista(s) cargadas")
-        return jsonify({"tracks": tracks})
+        return jsonify({"tracks": tracks, "playlist_name": get_playlist_name()})
     except Exception as e:
         add_log(f"[web] Error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -160,6 +222,17 @@ def _slskd_headers():
     return {"X-API-Key": SLSKD_KEY, "Content-Type": "application/json"}
 
 
+def _ensure_slskd_api_key():
+    global SLSKD_KEY
+    if SLSKD_KEY:
+        return SLSKD_KEY
+    generated = secrets.token_hex(32)
+    config_store.update({"slskd_api_key": generated})
+    SLSKD_KEY = generated
+    add_log("[slskd] API key generada y guardada en el almacén seguro")
+    return SLSKD_KEY
+
+
 def _start_slskd_from_config():
     global SLSKD_PROCESS
     path = config_store.get().get("slskd_path", "")
@@ -172,6 +245,7 @@ def _start_slskd_from_config():
     webroot_dir = os.path.join(os.path.dirname(path), "wwwroot")
     os.makedirs(incomplete_dir, exist_ok=True)
     os.makedirs(webroot_dir, exist_ok=True)
+    api_key = _ensure_slskd_api_key()
     environment = os.environ.copy()
     environment.update(
         {
@@ -180,6 +254,9 @@ def _start_slskd_from_config():
             "SLSKD__WEB__HTTPS__DISABLED": "true",
             "SLSKD__WEB__CONTENT_PATH": webroot_dir,
             "SLSKD_NO_HTTPS": "true",
+            "SLSKD__WEB__AUTHENTICATION__API_KEYS__SOULSEEK_WEB__KEY": api_key,
+            "SLSKD__WEB__AUTHENTICATION__API_KEYS__SOULSEEK_WEB__ROLE": "administrator",
+            "SLSKD__WEB__AUTHENTICATION__API_KEYS__SOULSEEK_WEB__CIDR": "127.0.0.1/32,::1/128",
         }
     )
     SLSKD_PROCESS = subprocess.Popen(
@@ -274,16 +351,28 @@ def _normalize_slskd(data):
     return data
 
 
+def _prune_active_searches():
+    cutoff = time.monotonic() - MAX_SEARCH_LIFETIME_SECONDS
+    expired = [search_id for search_id, started in ACTIVE_SEARCH_STARTED.items() if started < cutoff]
+    for search_id in expired:
+        ACTIVE_SEARCH_STARTED.pop(search_id, None)
+        ACTIVE_SEARCH_IDS.discard(search_id)
+
+
 @app.route("/api/search_soulseek", methods=["POST"])
 @app.route("/api/search_slskr", methods=["POST"])
 def api_search_soulseek():
     data = request.get_json() or {}
-    query = data.get("query", "").strip()
+    query = str(data.get("query", "")).strip()
     if not query:
         add_log("[search] Error: falta query")
         return jsonify({"error": "Falta query"}), 400
-
+    if len(query) > MAX_SEARCH_QUERY_LENGTH:
+        return jsonify({"error": f"La búsqueda no puede superar {MAX_SEARCH_QUERY_LENGTH} caracteres"}), 400
     if USE_SLSKD:
+        _prune_active_searches()
+        if len(ACTIVE_SEARCH_IDS) >= MAX_ACTIVE_SEARCHES:
+            return jsonify({"error": "Hay demasiadas búsquedas activas. Espera unos segundos e inténtalo de nuevo."}), 429
         add_log(f"[slskd] POST {SLSKD_URL}/api/v0/searches")
         add_log(f"[slskd] searchText='{query}'")
         if not _ensure_slskd_available():
@@ -304,6 +393,8 @@ def api_search_soulseek():
                 if not response.ok:
                     return jsonify({"error": f"Error {response.status_code}", "details": data}), response.status_code
                 data = _normalize_slskd(data)
+                ACTIVE_SEARCH_IDS.add(data["searchId"])
+                ACTIVE_SEARCH_STARTED[data["searchId"]] = time.monotonic()
                 return jsonify({
                     "searchId": data["searchId"],
                     "query": data["query"],
@@ -320,6 +411,10 @@ def api_search_soulseek():
 @app.route("/api/search_soulseek/<search_id>")
 @app.route("/api/search_slskr/<search_id>")
 def api_get_search_soulseek(search_id):
+    try:
+        uuid.UUID(search_id)
+    except (ValueError, AttributeError):
+        return jsonify({"error": "searchId inválido"}), 400
     if USE_SLSKD:
         try:
             state_resp = requests.get(
@@ -343,6 +438,10 @@ def api_get_search_soulseek(search_id):
             except Exception as e:
                 add_log(f"[slskd] GET responses error: {e}")
             data = _normalize_slskd(data)
+            status = str(data.get("status") or data.get("state") or "").lower()
+            if status in {"completed", "complete", "finished", "failed", "error", "cancelled", "canceled"}:
+                ACTIVE_SEARCH_IDS.discard(search_id)
+                ACTIVE_SEARCH_STARTED.pop(search_id, None)
             add_log(f"[slskd] GET data (searchId={search_id}): resultados={data['resultsCount']}")
             return jsonify(data)
         except Exception as e:
@@ -439,6 +538,169 @@ def api_preview_stream():
     )
 
 
+@app.route("/api/file/download")
+def api_file_download():
+    rel = request.args.get("path", "").strip()
+    dir_key = request.args.get("dir", "downloads").strip()
+    if not rel or dir_key not in {"downloads", "previews"}:
+        abort(400)
+    base = current_downloads_dir if dir_key == "downloads" else PREVIEWS_DIR
+    try:
+        full = _safe_join(base, rel)
+    except ValueError:
+        abort(403)
+    if not os.path.isfile(full):
+        abort(404)
+    return send_file(full, as_attachment=True, download_name=os.path.basename(full))
+
+
+@app.route("/api/preview/save", methods=["POST"])
+def api_save_preview():
+    data = request.get_json() or {}
+    rel = str(data.get("path", "")).strip()
+    folder_name = str(data.get("folder_name", "")).strip() or get_playlist_name()
+    track_key = str(data.get("track_key", "")).strip()
+    track_name = str(data.get("track_name", "")).strip()
+    artists = str(data.get("artists", "")).strip()
+    if not rel:
+        return jsonify({"error": "Falta el archivo de preview"}), 400
+    try:
+        source = _safe_join(PREVIEWS_DIR, rel)
+    except ValueError:
+        return jsonify({"error": "Path inválido"}), 403
+    if not os.path.isfile(source):
+        return jsonify({"error": "El preview ya no existe"}), 404
+
+    target_dir = os.path.join(current_downloads_dir, _safe_dirname(folder_name))
+    os.makedirs(target_dir, exist_ok=True)
+    destination = os.path.join(target_dir, os.path.basename(source))
+    try:
+        if os.path.abspath(source) != os.path.abspath(destination):
+            if os.path.exists(destination):
+                os.remove(source)
+            else:
+                shutil.move(source, destination)
+        saved_path = os.path.relpath(destination, current_downloads_dir).replace("\\", "/")
+        register_library_track(track_key, track_name, artists, saved_path)
+        add_log(f"[library] preview guardado en {saved_path}")
+        return jsonify({"ok": True, "path": saved_path, "folder": _safe_dirname(folder_name)})
+    except Exception as exc:
+        add_log(f"[library] error al guardar preview: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/file/stream")
+def api_file_stream():
+    rel = request.args.get("path", "").strip()
+    dir_key = request.args.get("dir", "downloads").strip()
+    if not rel or dir_key not in {"downloads", "previews"}:
+        abort(400)
+    base = current_downloads_dir if dir_key == "downloads" else PREVIEWS_DIR
+    try:
+        full = _safe_join(base, rel)
+    except ValueError:
+        abort(403)
+    if not os.path.isfile(full):
+        abort(404)
+    mimetype = mimetypes.guess_type(full)[0] or "application/octet-stream"
+    return send_file(full, mimetype=mimetype, conditional=True, as_attachment=False)
+
+
+def _spotify_oauth():
+    config = config_store.get()
+    client_id = config.get("spotify_client_id", "")
+    client_secret = config_store.get_secret("spotify_client_secret")
+    if not client_id or not client_secret:
+        raise RuntimeError("Configura primero Spotify Client ID y Client Secret en Settings.")
+    return LocalSpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=config.get("spotify_redirect_uri", "http://127.0.0.1:8080/callback"),
+        scope="playlist-read-private playlist-read-collaborative",
+        open_browser=True,
+    )
+
+
+def _spotify_auth_worker():
+    global SPOTIFY_AUTH_STATE
+    try:
+        auth = _spotify_oauth()
+        SPOTIFY_AUTH_STATE = {"status": "authenticating", "error": None}
+        auth.get_access_token(as_dict=True)
+        SPOTIFY_AUTH_STATE = {"status": "authenticated", "error": None}
+        add_log("[spotify] Autorización completada desde Settings")
+    except Exception as exc:
+        SPOTIFY_AUTH_STATE = {"status": "error", "error": str(exc)}
+        add_log(f"[spotify] Error de autorización: {exc}")
+
+
+@app.route("/api/spotify/auth/status")
+def api_spotify_auth_status():
+    global SPOTIFY_AUTH_STATE
+    config = config_store.get()
+    if not config.get("spotify_client_id") or not config_store.get_secret("spotify_client_secret"):
+        return jsonify({"status": "not_configured"})
+    if SPOTIFY_AUTH_STATE.get("status") == "authenticating":
+        return jsonify(SPOTIFY_AUTH_STATE)
+    try:
+        auth = _spotify_oauth()
+        token = auth.cache_handler.get_cached_token()
+        authenticated = bool(token and auth.validate_token(token))
+        status = "authenticated" if authenticated else "not_authenticated"
+        SPOTIFY_AUTH_STATE = {"status": status, "error": None}
+        return jsonify(SPOTIFY_AUTH_STATE)
+    except Exception as exc:
+        return jsonify({"status": "error", "error": str(exc)})
+
+
+@app.route("/api/spotify/auth/start", methods=["POST"])
+def api_spotify_auth_start():
+    global SPOTIFY_AUTH_THREAD, SPOTIFY_AUTH_STATE
+    with SPOTIFY_AUTH_LOCK:
+        if SPOTIFY_AUTH_THREAD and SPOTIFY_AUTH_THREAD.is_alive():
+            return jsonify({"status": "authenticating"}), 202
+        try:
+            _spotify_oauth()
+        except Exception as exc:
+            return jsonify({"status": "not_configured", "error": str(exc)}), 400
+        SPOTIFY_AUTH_STATE = {"status": "authenticating", "error": None}
+        SPOTIFY_AUTH_THREAD = threading.Thread(target=_spotify_auth_worker, daemon=True)
+        SPOTIFY_AUTH_THREAD.start()
+    return jsonify({"status": "authenticating"}), 202
+
+
+@app.route("/api/spotify/playlists")
+def api_spotify_playlists():
+    try:
+        auth = _spotify_oauth()
+        token = auth.cache_handler.get_cached_token()
+        if not token:
+            return jsonify({"error": "Conecta Spotify desde Settings primero."}), 401
+        spotify = spotipy.Spotify(auth_manager=auth)
+        playlists = []
+        response = spotify.current_user_playlists(limit=50)
+        while response and len(playlists) < 500:
+            for playlist in response.get("items", []):
+                if not playlist or not playlist.get("id"):
+                    continue
+                playlists.append({
+                    "id": playlist["id"],
+                    "name": playlist.get("name") or "Sin nombre",
+                    "url": playlist.get("external_urls", {}).get(
+                        "spotify",
+                        f"https://open.spotify.com/playlist/{playlist['id']}",
+                    ),
+                    "tracks": playlist.get("tracks", {}).get("total", 0),
+                })
+            if not response.get("next"):
+                break
+            response = spotify.next(response)
+        return jsonify({"playlists": playlists})
+    except Exception as exc:
+        add_log(f"[spotify] Error al cargar playlists: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/config")
 def api_get_config():
     data = config_store.get()
@@ -498,6 +760,10 @@ def api_download():
     username = data.get("username", "").strip()
     filename = data.get("filename", "").strip()
     size = data.get("size", 0)
+    folder_name = str(data.get("folder_name", "")).strip()
+    track_key = str(data.get("track_key", "")).strip()
+    track_name = str(data.get("track_name", "")).strip()
+    artists = str(data.get("artists", "")).strip()
     if not username or not filename:
         return jsonify({"error": "falta username o filename"}), 400
     add_log(f"[slskd] download enqueue user={username} file={filename}")
@@ -511,7 +777,14 @@ def api_download():
         add_log(f"[slskd] download enqueue {response.status_code}: {response.text[:300]}")
         if not response.ok:
             return jsonify({"error": f"slskd {response.status_code}", "status": "error"}), response.status_code
-        PENDING_DOWNLOADS.add((username, filename))
+        download_key = (username, filename)
+        PENDING_DOWNLOADS.add(download_key)
+        PENDING_DOWNLOAD_FOLDERS[download_key] = folder_name
+        PENDING_DOWNLOAD_METADATA[download_key] = {
+            "track_key": track_key,
+            "track_name": track_name,
+            "artists": artists,
+        }
         return jsonify({"ok": True})
     except Exception as e:
         add_log(f"[slskd] download enqueue error: {e}")
@@ -562,7 +835,8 @@ def api_download_status():
             latest = max(matches, key=os.path.getmtime)
             latest_abs = os.path.abspath(latest)
             previews_abs = os.path.abspath(PREVIEWS_DIR)
-            target_dir = os.path.join(current_downloads_dir, _safe_dirname(get_playlist_name()))
+            folder_name = PENDING_DOWNLOAD_FOLDERS.get((username, filename)) or get_playlist_name()
+            target_dir = os.path.join(current_downloads_dir, _safe_dirname(folder_name))
             is_in_previews = os.path.commonpath([latest_abs, previews_abs]) == previews_abs
             if is_in_previews:
                 os.makedirs(target_dir, exist_ok=True)
@@ -581,7 +855,16 @@ def api_download_status():
                     add_log(f"[slskd] download move error: {e}")
                     return jsonify({"state": "error", "error": str(e), "saved": False})
             rel = os.path.relpath(latest, current_downloads_dir).replace("\\", "/")
-            PENDING_DOWNLOADS.discard((username, filename))
+            download_key = (username, filename)
+            metadata = PENDING_DOWNLOAD_METADATA.pop(download_key, {})
+            register_library_track(
+                metadata.get("track_key"),
+                metadata.get("track_name"),
+                metadata.get("artists"),
+                rel,
+            )
+            PENDING_DOWNLOADS.discard(download_key)
+            PENDING_DOWNLOAD_FOLDERS.pop(download_key, None)
             return jsonify({"state": "Completed", "path": rel, "saved": True, "percentComplete": 100})
         return jsonify({"state": target_state, "percentComplete": percent_complete})
     except Exception as e:
@@ -696,6 +979,7 @@ def api_diagnostics():
         return jsonify({
             "previews": files,
             "downloads": downloads_files,
+            "library_index": load_library_index(),
             "transfers": transfers,
             "configuration": {
                 "backend": {"ready": True},
@@ -727,19 +1011,22 @@ def api_delete():
     dir_key = data.get("dir", "previews")
     if not rel:
         return jsonify({"error": "Falta path"}), 400
-    if dir_key == "downloads":
-        base = current_downloads_dir
-    else:
-        base = PREVIEWS_DIR
+    if dir_key not in {"downloads", "previews"}:
+        return jsonify({"error": "Directorio inválido"}), 400
+    base = current_downloads_dir if dir_key == "downloads" else PREVIEWS_DIR
     try:
         full = _safe_join(base, rel)
     except ValueError:
         return jsonify({"error": "Path inválido"}), 403
     try:
+        if not os.path.exists(full):
+            return jsonify({"error": "El archivo ya no existe"}), 404
         if os.path.isdir(full):
             shutil.rmtree(full)
         else:
             os.remove(full)
+        if dir_key == "downloads":
+            remove_library_paths(rel)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

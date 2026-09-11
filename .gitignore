@@ -14,6 +14,7 @@ previews/
 *_soulseek.txt
 web_logs.json
 web_config.json
+web_library_index.json
 *.log
 
 slskd-*/
