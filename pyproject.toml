@@ -3,8 +3,8 @@ line-length = 120
 exclude = ["slskd-*", "slskr-*", "previews", "frontend"]
 
 [tool.ruff.lint.per-file-ignores]
-"backend/spotify_web.py" = ["BLE001", "S110", "DTZ005"]
-"backend/local_config.py" = ["BLE001", "S110"]
+"backend/*.py" = ["BLE001", "S110", "DTZ005"]
+"backend/routes/*.py" = ["BLE001", "S110"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

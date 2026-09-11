@@ -1,6 +1,7 @@
 import pytest
 
-from backend.spotify_web import _safe_dirname, _safe_join
+from backend.fs_utils import safe_dirname as _safe_dirname
+from backend.fs_utils import safe_join as _safe_join
 
 
 def test_safe_dirname_removes_windows_reserved_characters():
