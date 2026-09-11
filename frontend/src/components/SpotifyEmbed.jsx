@@ -31,15 +31,16 @@ export default function SpotifyEmbed({ trackId, previewUrl, open, onToggle }) {
             </button>
           )}
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="rounded border border-[#2C303D] px-2.5 py-1.5 text-xs text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
-        >
-          abrir en Spotify
-        </button>
-      )}
+      ) : trackId ? (
+        <iframe
+          src={`https://open.spotify.com/embed/track/${trackId}`}
+          width="100%"
+          height="80"
+          style={{ border: 0, borderRadius: '8px' }}
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy"
+        />
+      ) : null}
     </div>
   )
 }
