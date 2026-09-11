@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { TrackCardSkeleton } from './ui'
 import TrackCard from './TrackCard'
 
@@ -36,6 +37,8 @@ export default function TrackList({
   onRefreshSearch,
   onCancelSearch,
 }) {
+  const [activeEmbedIndex, setActiveEmbedIndex] = useState(null)
+
   if (loading) {
     return (
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2" aria-label="Cargando pistas">
@@ -125,6 +128,8 @@ export default function TrackList({
             onCancelDownload={onCancelDownload}
             onRefreshSearch={onRefreshSearch}
             onCancelSearch={onCancelSearch}
+            embedOpen={activeEmbedIndex === i}
+            onToggleEmbed={() => setActiveEmbedIndex(activeEmbedIndex === i ? null : i)}
           />
         ))}
       </div>

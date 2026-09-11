@@ -34,6 +34,8 @@ export default function TrackCard({
   onCancelDownload,
   onRefreshSearch,
   onCancelSearch,
+  embedOpen,
+  onToggleEmbed,
 }) {
   const t = track
   const i = index
@@ -106,7 +108,12 @@ export default function TrackCard({
       )}
 
       {(spotifyTrackId || t.spotify_preview) && (
-        <SpotifyEmbed trackId={spotifyTrackId} previewUrl={t.spotify_preview} />
+        <SpotifyEmbed
+          trackId={spotifyTrackId}
+          previewUrl={t.spotify_preview}
+          open={embedOpen}
+          onToggle={onToggleEmbed}
+        />
       )}
 
       <div className="mt-3 flex items-center gap-2">
