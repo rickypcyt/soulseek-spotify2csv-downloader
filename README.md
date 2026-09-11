@@ -44,6 +44,8 @@ La aplicación se ejecuta completamente en tu equipo:
 - Guardar las descargas en una carpeta con el nombre de la playlist.
 - Ver y reproducir la Biblioteca local.
 - Mover previews temporales a la Biblioteca local.
+- Arrastrar canciones entre carpetas/playlists de la Biblioteca.
+- Arrastrar previews desde `temp` a una carpeta de la Biblioteca.
 - Descargar o borrar archivos de la Biblioteca y de `temp`.
 - Consultar logs, transferencias y estado de los servicios.
 - Mantener resultados de búsqueda, preferencias y canciones descargadas entre sesiones.
@@ -275,7 +277,7 @@ Las carpetas `temp` y `.incomplete` no aparecen dentro de la Biblioteca local.
 
 La aplicación identifica canciones descargadas usando:
 
-1. El ID de Spotify guardado en `web_library_index.json`.
+1. El ID de Spotify guardado en la tabla local `library_tracks` de SQLite.
 2. El nombre de la pista comparado con los archivos existentes como compatibilidad para descargas antiguas.
 
 Si una canción ya está en la Biblioteca, aparece atenuada con el mensaje:
@@ -288,25 +290,44 @@ La marca depende de la Biblioteca local, no de la cuenta de Soulseek.
 
 ## Persistencia
 
-### Configuración
+La aplicación utiliza una base de datos SQLite local por usuario:
 
-La configuración normal se guarda en:
+```text
+~/.spotify-soulseek/soulseek.db
+```
+
+En Windows normalmente corresponde a:
+
+```text
+C:\Users\TU_USUARIO\.spotify-soulseek\soulseek.db
+```
+
+Cada usuario del sistema tiene su propia base de datos local. El archivo nunca se sube al repositorio ni se comparte con otros usuarios. Está excluido por `.gitignore` mediante los patrones `*.db`, `*.sqlite` y `*.sqlite3`.
+
+SQLite almacena:
+
+- Configuración pública.
+- Índice de canciones descargadas.
+- Logs del backend.
+- Metadatos de persistencia y migración.
+
+Las contraseñas, API keys, Client Secrets y tokens siguen guardándose en `keyring`, no en SQLite.
+
+### Migración automática
+
+Si existe una instalación anterior con estos archivos:
 
 ```text
 web_config.json
+web_library_index.json
+web_logs.json
 ```
 
-Los secretos se guardan con `keyring` en el almacén nativo del sistema:
-
-```text
-Windows → Credential Manager
-macOS   → Keychain
-Linux   → Secret Service / KWallet
-```
+la aplicación los importa automáticamente a SQLite durante el primer arranque. No se deben borrar manualmente hasta confirmar que la migración terminó correctamente.
 
 ### Resultados de búsqueda
 
-Los resultados se guardan en la caché local del navegador por playlist y canción.
+Los resultados se mantienen actualmente en la caché local del navegador por playlist y canción.
 
 - Duran hasta 7 días.
 - Se identifican por URL de playlist e ID de Spotify.
@@ -325,14 +346,6 @@ Persisten las preferencias de:
 - Formato preferido.
 
 El recomendado siempre aparece primero según esas preferencias y el segundo resultado es la siguiente mejor opción.
-
-### Biblioteca
-
-El índice de canciones descargadas se guarda localmente en:
-
-```text
-web_library_index.json
-```
 
 ## Puertos utilizados
 
@@ -476,7 +489,8 @@ soulseek/
 │   ├── __init__.py
 │   ├── spotify_web.py       # Aplicación Flask y API
 │   ├── backend_config.py    # Rutas y ajustes del backend
-│   ├── local_config.py      # JSON público y keyring
+│   ├── database.py          # SQLite local por usuario
+│   ├── local_config.py      # SQLite público y keyring
 │   ├── spotify_service.py   # Ejecución del conversor
 │   └── spotify_to_csv.py    # Conversión de enlaces de Spotify
 ├── frontend/
@@ -501,9 +515,8 @@ soulseek/
 
 Archivos locales o generados que no deben subirse al repositorio:
 
-- `web_config.json`.
-- `web_library_index.json`.
-- `web_logs.json`.
+- Bases de datos SQLite (`*.db`, `*.sqlite`, `*.sqlite3`).
+- `web_config.json`, `web_library_index.json` y `web_logs.json` heredados.
 - `.env`, `.env.local` y `.env.*` heredados.
 - `vendor/`.
 - `.setup-cache/`.
@@ -519,7 +532,7 @@ Archivos locales o generados que no deben subirse al repositorio:
 - La interfaz nunca vuelve a mostrar Client Secrets, contraseñas o API keys.
 - La configuración se introduce desde la interfaz.
 - `run.ps1` ya no carga archivos `.env`.
-- No compartas `web_config.json`, `web_library_index.json`, tokens, API keys ni contraseñas.
+- No compartas la base SQLite local, archivos JSON heredados, tokens, API keys ni contraseñas.
 - No publiques los enlaces de callback de Spotify.
 - No expongas `slskd` a Internet sin una arquitectura de seguridad adicional.
 

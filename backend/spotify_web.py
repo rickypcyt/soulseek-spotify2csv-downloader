@@ -1,6 +1,5 @@
 import csv
 import glob
-import json
 import mimetypes
 import os
 import re
@@ -19,6 +18,24 @@ import spotipy
 from flask import Flask, abort, jsonify, request, send_file
 
 from backend.backend_config import BackendSettings
+from backend.database import (
+    get_library_index,
+)
+from backend.database import (
+    load_logs as load_database_logs,
+)
+from backend.database import (
+    move_library_path as move_database_path,
+)
+from backend.database import (
+    register_library_track as register_database_track,
+)
+from backend.database import (
+    remove_library_paths as remove_database_paths,
+)
+from backend.database import (
+    save_logs as save_database_logs,
+)
 from backend.local_config import LocalConfigStore
 from backend.spotify_service import read_tracks, run_conversion
 from backend.spotify_to_csv import LocalSpotifyOAuth
@@ -31,24 +48,6 @@ CSV_OUTPUT = str(SETTINGS.csv_output)
 PLAYLIST_NAME_FILE = str(SETTINGS.playlist_name_file)
 DOWNLOADS_DIR = str(SETTINGS.downloads_dir)
 CONFIG_FILE = str(SETTINGS.config_file)
-
-
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        return {}
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_config(cfg):
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
 
 
 def _safe_dirname(name):
@@ -69,47 +68,19 @@ def get_playlist_name():
 
 
 def load_library_index():
-    index_path = os.path.join(SCRIPT_DIR, "web_library_index.json")
-    if not os.path.exists(index_path):
-        return {}
-    try:
-        with open(index_path, encoding="utf-8") as handle:
-            data = json.load(handle)
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def save_library_index(index):
-    index_path = os.path.join(SCRIPT_DIR, "web_library_index.json")
-    temporary = f"{index_path}.tmp"
-    with open(temporary, "w", encoding="utf-8") as handle:
-        json.dump(index, handle, ensure_ascii=False, indent=2)
-    os.replace(temporary, index_path)
+    return get_library_index()
 
 
 def register_library_track(track_key, track_name, artists, path):
-    if not track_key:
-        return
-    index = load_library_index()
-    index[str(track_key)] = {
-        "track_name": str(track_name or ""),
-        "artists": str(artists or ""),
-        "path": path,
-    }
-    save_library_index(index)
+    register_database_track(track_key, track_name, artists, path)
+
+
+def move_library_path(old_path, new_path):
+    move_database_path(old_path, new_path)
 
 
 def remove_library_paths(path):
-    index = load_library_index()
-    prefix = path.rstrip("/") + "/"
-    updated = {
-        key: value
-        for key, value in index.items()
-        if value.get("path") != path and not str(value.get("path", "")).startswith(prefix)
-    }
-    if updated != index:
-        save_library_index(updated)
+    remove_database_paths(path)
 
 
 config_store = LocalConfigStore(SETTINGS.config_file)
@@ -135,34 +106,13 @@ SPOTIFY_AUTH_LOCK = threading.Lock()
 
 app = Flask(__name__, static_folder=DIST_DIR, static_url_path="")
 
-LOGS_FILE = str(SETTINGS.logs_file)
-
-
-def load_logs():
-    if os.path.exists(LOGS_FILE):
-        try:
-            with open(LOGS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return []
-    return []
-
-
-def save_logs():
-    try:
-        with open(LOGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(list(log_messages), f, ensure_ascii=False)
-    except Exception:
-        pass
-
-
-log_messages = deque(load_logs(), maxlen=200)
+log_messages = deque(load_database_logs(), maxlen=200)
 
 
 def add_log(msg):
     ts = datetime.now().strftime("%H:%M:%S")
     log_messages.append(f"[{ts}] {msg}")
-    save_logs()
+    save_database_logs(list(log_messages))
 
 
 def fetch_csv(url):
@@ -589,6 +539,41 @@ def api_save_preview():
         return jsonify({"error": str(exc)}), 500
 
 
+@app.route("/api/library/move", methods=["POST"])
+def api_library_move():
+    data = request.get_json() or {}
+    source_dir = str(data.get("source_dir", "")).strip()
+    source_path = str(data.get("source_path", "")).strip()
+    target_folder = str(data.get("target_folder", "")).strip().strip("/\\")
+    if source_dir not in {"downloads", "previews"} or not source_path:
+        return jsonify({"error": "Origen o archivo inválido"}), 400
+    source_base = current_downloads_dir if source_dir == "downloads" else PREVIEWS_DIR
+    try:
+        source = _safe_join(source_base, source_path)
+        target_dir = _safe_join(current_downloads_dir, target_folder)
+    except ValueError:
+        return jsonify({"error": "Ruta inválida"}), 403
+    if not os.path.isfile(source):
+        return jsonify({"error": "El archivo de origen no existe"}), 404
+    os.makedirs(target_dir, exist_ok=True)
+    destination = os.path.join(target_dir, os.path.basename(source))
+    if os.path.abspath(source) == os.path.abspath(destination):
+        return jsonify({"ok": True, "path": os.path.relpath(destination, current_downloads_dir).replace("\\", "/")})
+    if os.path.exists(destination):
+        return jsonify({"error": "Ya existe un archivo con ese nombre en la carpeta destino"}), 409
+    try:
+        shutil.move(source, destination)
+        new_path = os.path.relpath(destination, current_downloads_dir).replace("\\", "/")
+        if source_dir == "downloads":
+            old_path = source_path.replace("\\", "/")
+            move_library_path(old_path, new_path)
+        add_log(f"[library] archivo movido a {new_path}")
+        return jsonify({"ok": True, "path": new_path})
+    except Exception as exc:
+        add_log(f"[library] error al mover archivo: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/api/file/stream")
 def api_file_stream():
     rel = request.args.get("path", "").strip()
@@ -805,6 +790,7 @@ def api_download_status():
         return jsonify({"state": "not configured"}), 200
     username = request.args.get("username", "").strip()
     filename = request.args.get("filename", "").strip()
+    requested_folder = request.args.get("folder_name", "").strip()
     if not username or not filename:
         return jsonify({"state": "missing"}), 200
     try:
@@ -828,11 +814,6 @@ def api_download_status():
                 break
         if str(target_state).lower() not in {"completed", "complete", "succeeded", "finished"}:
             return jsonify({"state": target_state, "percentComplete": percent_complete})
-        if (username, filename) not in PENDING_DOWNLOADS:
-            # Previews and other files remain in temp unless the user explicitly
-            # requested this file through the download action.
-            return jsonify({"state": target_state, "percentComplete": percent_complete})
-
         base = os.path.basename(filename.replace("\\", "/").replace("/", os.sep))
         # Buscar en temporales y mover el archivo terminado a la carpeta final.
         matches = glob.glob(os.path.join(PREVIEWS_DIR, "**", glob.escape(base)), recursive=True)
@@ -843,8 +824,9 @@ def api_download_status():
             latest = max(matches, key=os.path.getmtime)
             latest_abs = os.path.abspath(latest)
             previews_abs = os.path.abspath(PREVIEWS_DIR)
-            folder_name = PENDING_DOWNLOAD_FOLDERS.get((username, filename)) or get_playlist_name()
+            folder_name = requested_folder or PENDING_DOWNLOAD_FOLDERS.get((username, filename)) or get_playlist_name()
             target_dir = os.path.join(current_downloads_dir, _safe_dirname(folder_name))
+            add_log(f"[library] destino de descarga: {target_dir}")
             is_in_previews = os.path.commonpath([latest_abs, previews_abs]) == previews_abs
             if is_in_previews:
                 os.makedirs(target_dir, exist_ok=True)

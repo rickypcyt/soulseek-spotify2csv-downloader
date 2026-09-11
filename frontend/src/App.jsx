@@ -12,8 +12,9 @@ const FONT_MONO = "'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace"
 const FONT_BODY = "'IBM Plex Sans', 'Segoe UI', sans-serif"
 
 const RESULTS_PER_TRACK = 5
-const SEARCH_BATCH_SIZE = 4
-const SEARCH_BATCH_DELAY_MS = 800
+const SEARCH_BATCH_SIZE = 6
+const SEARCH_BATCH_DELAY_MS = 700
+const SEARCH_POLL_INTERVAL_MS = 1500
 const LIBRARY_PAGE_SIZE = 12
 const PREVIEW_PAGE_SIZE = 12
 
@@ -165,6 +166,19 @@ function buildFolderTree(files) {
   return root
 }
 
+function getFolderStats(node) {
+  return Object.values(node.folders).reduce(
+    (total, folder) => {
+      const nested = getFolderStats(folder)
+      return { files: total.files + nested.files, size: total.size + nested.size }
+    },
+    {
+      files: node.files.filter(isPlayableFile).length,
+      size: node.files.reduce((total, file) => total + (Number(file.size) || 0), 0),
+    },
+  )
+}
+
 function formatDuration(ms) {
   if (!ms || isNaN(ms)) return '--:--'
   const total = Math.floor(Number(ms) / 1000)
@@ -243,7 +257,7 @@ function Pagination({ page, total, pageSize, onChange }) {
   )
 }
 
-function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, formatSize, onDelete }) {
+function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, formatSize, onDelete, dragDir, onMoveStart }) {
   const audioRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -270,7 +284,17 @@ function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, formatSize
   }
 
   return (
-    <div className="rounded-lg border border-[#2C303D] bg-[#161822] p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)]">
+    <div
+      draggable={Boolean(dragDir)}
+      onDragStart={(event) => {
+        if (dragDir) {
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('application/x-soulseek-file', JSON.stringify({ dir: dragDir, path: file.path }))
+        }
+        onMoveStart?.(event)
+      }}
+      className="cursor-grab rounded-lg border border-[#2C303D] bg-[#161822] p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)] active:cursor-grabbing"
+    >
       <div className="flex items-start gap-2">
         <button
           onClick={togglePlayback}
@@ -483,6 +507,19 @@ function App() {
     window.history.pushState({}, '', path)
     setCurrentPath(path)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const startNewPlaylist = () => {
+    setUrl('')
+    setOutputFolderName('')
+    setTracks([])
+    setSearches([])
+    setSelected(new Set())
+    setDownloads({})
+    setLibraryPage(1)
+    setPreviewPage(1)
+    autoSearchStarted.current = false
+    navigate('/')
   }
 
   useEffect(() => {
@@ -752,7 +789,7 @@ function App() {
       }
     }
 
-    const iv = setInterval(poll, 3000)
+    const iv = setInterval(poll, SEARCH_POLL_INTERVAL_MS)
     return () => clearInterval(iv)
   }, [])
 
@@ -854,6 +891,7 @@ function App() {
 
   const enqueueDownload = async (i, res) => {
     if (!res) return
+    const downloadFolderName = outputFolderName.trim()
     stopDownloadTimer(i)
     setDownloads((prev) => ({
       ...prev,
@@ -861,6 +899,7 @@ function App() {
         username: res.username,
         filename: res.filename,
         size: res.size,
+        folder_name: downloadFolderName,
         state: 'encolando',
         percent: 0,
         path: null,
@@ -875,7 +914,7 @@ function App() {
           username: res.username,
           filename: res.filename,
           size: res.size,
-          folder_name: outputFolderName,
+          folder_name: downloadFolderName,
           track_key: getSpotifyTrackId(tracks[i]?.spotify_url),
           track_name: tracks[i]?.track_name,
           artists: tracks[i]?.artists,
@@ -890,7 +929,7 @@ function App() {
       downloadTimers.current[i] = setInterval(async () => {
         try {
           const st = await request(
-            `/api/download/status?username=${encodeURIComponent(res.username)}&filename=${encodeURIComponent(res.filename)}`
+            `/api/download/status?username=${encodeURIComponent(res.username)}&filename=${encodeURIComponent(res.filename)}&folder_name=${encodeURIComponent(downloadFolderName)}`
           )
           const d = await st.json()
           if (d.path) {
@@ -1005,17 +1044,56 @@ function App() {
     }
   }
 
-  const renderDownloadTree = (node, level = 0) => {
+  const moveLibraryFile = async (source, targetFolder) => {
+    try {
+      await requestJson('/api/library/move', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_dir: source.dir,
+          source_path: source.path,
+          target_folder: targetFolder,
+        }),
+      })
+      await fetchDiagnostics()
+    } catch (err) {
+      alert('No se pudo mover el archivo: ' + err.message)
+    }
+  }
+
+  const renderDownloadTree = (node, level = 0, fullNode = node, folderPath = '') => {
     const folders = Object.entries(node.folders).sort(([a], [b]) => a.localeCompare(b))
     const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
     return (
       <div className={level > 0 ? 'ml-3 border-l border-[#2C303D] pl-2' : ''}>
-        {folders.map(([name, folder]) => (
-          <details key={name} open={level === 0} className="py-0.5">
-            <summary className="cursor-pointer truncate py-1 text-[#E9EAF0] hover:text-white">{name}</summary>
-            {renderDownloadTree(folder, level + 1)}
-          </details>
-        ))}
+        {folders.map(([name, folder]) => {
+          const sourceFolder = fullNode.folders[name] || folder
+          const stats = getFolderStats(sourceFolder)
+          const destinationFolder = folderPath ? `${folderPath}/${name}` : name
+          return (
+            <details
+              key={name}
+              open={level === 0}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault()
+                try {
+                  const source = JSON.parse(event.dataTransfer.getData('application/x-soulseek-file'))
+                  if (source?.path) moveLibraryFile(source, destinationFolder)
+                } catch {}
+              }}
+              className="mb-2 overflow-hidden rounded-lg border border-[#2C303D] bg-[#161822]"
+            >
+              <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-[#E9EAF0] hover:bg-[#1A1D28]">
+                <span className="min-w-0 truncate text-sm font-medium">{name}</span>
+                <span className="shrink-0 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
+                  {stats.files} canciones · {formatSize(stats.size)}
+                </span>
+              </summary>
+              {renderDownloadTree(folder, level + 1, sourceFolder, destinationFolder)}
+            </details>
+          )
+        })}
         {files.map((file) => (
           isPlayableFile(file) ? (
             <LibraryAudioCard
@@ -1023,6 +1101,7 @@ function App() {
               file={file}
               streamUrl={storedFileStreamUrl('downloads', file.path)}
               formatSize={formatSize}
+              dragDir="downloads"
               onDelete={(path) => {
                 if (confirm(`¿Borrar ${path}?`)) deleteItem(path, 'downloads')
               }}
@@ -1830,16 +1909,33 @@ function App() {
                   actualizar
                 </button>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto bg-[#0D0F16] p-3 text-[11px] text-[#E9EAF0]">
+              <div
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault()
+                  try {
+                    const source = JSON.parse(event.dataTransfer.getData('application/x-soulseek-file'))
+                    if (source?.path) moveLibraryFile(source, '')
+                  } catch {}
+                }}
+                className="min-h-0 flex-1 overflow-y-auto bg-[#0D0F16] p-3 text-[11px] text-[#E9EAF0]"
+              >
                 {!diagnostics ? (
                   <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>cargando…</p>
                 ) : libraryFiles.length > 0 ? (
-                  renderDownloadTree(buildFolderTree(visibleLibraryFiles))
+                  renderDownloadTree(buildFolderTree(visibleLibraryFiles), 0, buildFolderTree(libraryFiles))
                 ) : (
                   <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>la carpeta está vacía</p>
                 )}
               </div>
               <Pagination page={currentLibraryPage} total={libraryFiles.length} pageSize={LIBRARY_PAGE_SIZE} onChange={setLibraryPage} />
+              <button
+                type="button"
+                onClick={startNewPlaylist}
+                className="m-3 rounded-md border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-3 py-2 text-xs font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20"
+              >
+                + nuevo playlist
+              </button>
             </div>
 
             <div className={`${activeTab === 'logs' ? 'flex' : 'hidden'} min-h-[calc(100vh-15rem)] h-[calc(100vh-15rem)] flex-col rounded-lg border border-[#2C303D]`}>
@@ -1903,6 +1999,7 @@ function App() {
                               streamUrl={storedFileStreamUrl('previews', f.path)}
                               onDownload={saveTemporaryPreviewToLibrary}
                               formatSize={formatSize}
+                              dragDir="previews"
                               onDelete={(path) => {
                                 if (confirm(`¿Borrar ${path}?`)) deleteItem(path, 'previews')
                               }}
@@ -1922,6 +2019,9 @@ function App() {
             </div>
           </div>
         </div>
+        <footer className="mt-8 border-t border-[#2C303D] pt-3 text-center text-[11px] text-[#565C6E]" style={{ fontFamily: FONT_MONO }}>
+          SQLite local · datos de este usuario · no se comparte con otros usuarios
+        </footer>
       </div>
     </div>
   )

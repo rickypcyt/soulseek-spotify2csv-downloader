@@ -15,6 +15,9 @@ previews/
 web_logs.json
 web_config.json
 web_library_index.json
+*.db
+*.sqlite
+*.sqlite3
 *.log
 
 slskd-*/

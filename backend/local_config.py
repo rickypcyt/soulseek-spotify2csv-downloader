@@ -1,6 +1,7 @@
-import json
 from pathlib import Path
 from typing import Any
+
+from backend.database import DB_PATH, get_settings, initialize_database, update_settings
 
 try:
     import keyring
@@ -18,27 +19,15 @@ SECRET_NAMES = {
 
 
 class LocalConfigStore:
-    """Stores normal settings in JSON and secrets in the OS credential vault."""
+    """Stores public settings in the per-user SQLite database and secrets in keyring."""
 
     def __init__(self, config_path: Path):
         self.config_path = Path(config_path)
-
-    def _read_public(self) -> dict[str, Any]:
-        if not self.config_path.exists():
-            return {}
-        try:
-            with self.config_path.open(encoding="utf-8") as handle:
-                data = json.load(handle)
-            return data if isinstance(data, dict) else {}
-        except (OSError, json.JSONDecodeError):
-            return {}
-
-    def _write_public(self, data: dict[str, Any]) -> None:
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.config_path.with_suffix(".tmp")
-        with temporary.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
-        temporary.replace(self.config_path)
+        self.db_path = DB_PATH if self.config_path.name == "web_config.json" else self.config_path.with_suffix(".db")
+        initialize_database(
+            legacy_root=self.config_path.parent if self.config_path.name == "web_config.json" else None,
+            db_path=self.db_path,
+        )
 
     def _get_secret(self, name: str) -> str:
         if keyring is not None:
@@ -56,7 +45,7 @@ class LocalConfigStore:
         keyring.set_password(SERVICE_NAME, name, value)
 
     def get(self) -> dict[str, Any]:
-        public = self._read_public()
+        public = get_settings(self.db_path)
         result = {
             "spotify_client_id": public.get("spotify_client_id", ""),
             "spotify_redirect_uri": public.get("spotify_redirect_uri", "http://127.0.0.1:8080/callback"),
@@ -76,7 +65,6 @@ class LocalConfigStore:
         return self._get_secret(name)
 
     def update(self, values: dict[str, Any]) -> dict[str, Any]:
-        public = self._read_public()
         public_keys = {
             "spotify_client_id",
             "spotify_redirect_uri",
@@ -84,11 +72,12 @@ class LocalConfigStore:
             "downloads_dir",
             "slskd_path",
         }
-        for key in public_keys:
-            if key in values and values[key] is not None:
-                public[key] = str(values[key]).strip()
-        public.pop("soulseek_username", None)
-        self._write_public(public)
+        public_values = {
+            key: str(values[key]).strip()
+            for key in public_keys
+            if key in values and values[key] is not None
+        }
+        update_settings(public_values, self.db_path)
 
         for name in SECRET_NAMES:
             if name in values and values[name] is not None:
