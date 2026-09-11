@@ -45,6 +45,13 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
                 path TEXT NOT NULL,
                 downloaded_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS playlist_track_status (
+                playlist_key TEXT NOT NULL,
+                track_key TEXT NOT NULL,
+                downloaded INTEGER NOT NULL DEFAULT 0 CHECK(downloaded IN (0, 1)),
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (playlist_key, track_key)
+            );
             CREATE TABLE IF NOT EXISTS app_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 message TEXT NOT NULL,
@@ -138,6 +145,28 @@ def get_library_index(db_path: Path = DB_PATH) -> dict[str, dict[str, str]]:
         }
         for row in rows
     }
+
+
+def get_playlist_track_statuses(playlist_key: str, db_path: Path = DB_PATH) -> dict[str, bool]:
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        rows = connection.execute(
+            "SELECT track_key, downloaded FROM playlist_track_status WHERE playlist_key = ?",
+            (str(playlist_key),),
+        ).fetchall()
+    return {row["track_key"]: bool(row["downloaded"]) for row in rows}
+
+
+def set_playlist_track_status(playlist_key: str, track_key: str, downloaded: bool, db_path: Path = DB_PATH) -> None:
+    if not playlist_key or not track_key:
+        raise ValueError("Falta playlist_key o track_key")
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO playlist_track_status(playlist_key, track_key, downloaded, updated_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(playlist_key, track_key) DO UPDATE SET downloaded=excluded.downloaded, updated_at=excluded.updated_at",
+            (str(playlist_key), str(track_key), 1 if downloaded else 0, _now()),
+        )
 
 
 def register_library_track(track_key: str, track_name: str, artists: str, path: str, db_path: Path = DB_PATH) -> None:

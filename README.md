@@ -33,6 +33,7 @@ La aplicación se ejecuta completamente en tu equipo:
 ## Qué puedes hacer
 
 - Cargar playlists, álbumes, artistas o canciones de Spotify.
+- Buscar texto plano directamente en Soulseek sin usar un enlace de Spotify.
 - Seleccionar una playlist del usuario autenticado desde la interfaz.
 - Buscar varias canciones en Soulseek de forma controlada.
 - Revisar resultados por nombre, formato, tamaño, bitrate y velocidad.
@@ -46,6 +47,7 @@ La aplicación se ejecuta completamente en tu equipo:
 - Mover previews temporales a la Biblioteca local.
 - Arrastrar canciones entre carpetas/playlists de la Biblioteca.
 - Arrastrar previews desde `temp` a una carpeta de la Biblioteca.
+- Crear nuevas carpetas de playlists inline desde la Biblioteca.
 - Descargar o borrar archivos de la Biblioteca y de `temp`.
 - Consultar logs, transferencias y estado de los servicios.
 - Mantener resultados de búsqueda, preferencias y canciones descargadas entre sesiones.
@@ -188,7 +190,7 @@ El token no se expone en la interfaz ni se guarda en archivos JSON.
    ```
 
 3. En **Settings**, configura Spotify y Soulseek si es la primera vez.
-4. En **Principal**, pega una URL de Spotify o pulsa **cargar mis playlists**.
+4. En **Principal**, pega una URL de Spotify, escribe texto plano para buscar directamente en Soulseek o pulsa **elegir una playlist de Spotify**.
 5. Selecciona una playlist del selector si quieres cargarla desde tu cuenta.
 6. Pulsa **Cargar playlist**.
 7. Edita el nombre de la carpeta de salida si lo deseas.

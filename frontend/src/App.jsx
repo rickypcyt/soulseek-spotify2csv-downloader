@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ToastContainer, toast } from 'react-toastify'
+import 'react-toastify/dist/ReactToastify.css'
 import { request, requestJson } from './api/client'
+import AppFooter from './components/AppFooter'
+import AppNavbar from './components/AppNavbar'
+import ConfigurationStatus from './components/ConfigurationStatus'
+import LibraryPanel from './components/LibraryPanel'
+import LogsPanel from './components/LogsPanel'
+import PlaylistPicker from './components/PlaylistPicker'
+import RecommendConfig from './components/RecommendConfig'
 import SettingsPanel from './components/SettingsPanel'
-import { extOf, pickBest, rankResults } from './utils/resultPicker'
+import SourceInput from './components/SourceInput'
+import TemporalesPanel from './components/TemporalesPanel'
+import TrackList from './components/TrackList'
+import { FONT_BODY, isCompletedTransfer, isLibraryFile } from './constants'
+import { pickBest, rankResults } from './utils/resultPicker'
 
 const HISTORY_KEY = 'spotifyUrlHistory'
+const OUTPUT_FOLDER_PREFERENCES_KEY = 'soulseekOutputFolderPreferences'
 const SEARCH_PREFERENCES_KEY = 'soulseekSearchPreferences'
 
-// ---- design tokens -------------------------------------------------------
-const FONT_DISPLAY = "'Space Grotesk', 'Segoe UI', sans-serif"
-const FONT_MONO = "'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace"
-const FONT_BODY = "'IBM Plex Sans', 'Segoe UI', sans-serif"
-
-const RESULTS_PER_TRACK = 5
 const SEARCH_BATCH_SIZE = 6
 const SEARCH_BATCH_DELAY_MS = 700
 const SEARCH_POLL_INTERVAL_MS = 1500
-const LIBRARY_PAGE_SIZE = 12
-const PREVIEW_PAGE_SIZE = 12
-
-/*
-  Add these to your index.html <head> to get the intended type:
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
-*/
 
 function normalizeHistory(entries) {
   return (Array.isArray(entries) ? entries : [])
@@ -31,7 +31,7 @@ function normalizeHistory(entries) {
       if (!item?.url) return null
       return {
         url: item.url,
-        name: item.name || getHistoryLabel(item.url, index),
+        name: item.name || item.title || getHistoryLabel(item.url, index),
       }
     })
     .filter(Boolean)
@@ -90,6 +90,21 @@ function loadLastPlaylist() {
   }
 }
 
+function loadOutputFolderPreferences() {
+  try {
+    const preferences = JSON.parse(localStorage.getItem(OUTPUT_FOLDER_PREFERENCES_KEY) || '{}')
+    return preferences && typeof preferences === 'object' ? preferences : {}
+  } catch {
+    return {}
+  }
+}
+
+function getOutputFolderPreference(url) {
+  if (!url) return undefined
+  const preferences = loadOutputFolderPreferences()
+  return Object.prototype.hasOwnProperty.call(preferences, url) ? preferences[url] : undefined
+}
+
 const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 function searchCacheKey(url) {
@@ -139,54 +154,6 @@ function saveSearchCache(url, searches) {
   } catch {}
 }
 
-function isLibraryFile(file) {
-  const firstFolder = file.path.split('/').filter(Boolean)[0]?.toLowerCase()
-  return firstFolder !== 'temp' && firstFolder !== '.incomplete'
-}
-
-function isPlayableFile(file) {
-  return /\.(flac|mp3|m4a|aac|ogg|opus|wav|webm)$/i.test(file.name || file.path)
-}
-
-function buildFolderTree(files) {
-  const root = { folders: {}, files: [] }
-  files
-    .filter(isLibraryFile)
-    .forEach((file) => {
-      const parts = file.path.split('/').filter(Boolean)
-      if (parts.length === 0) return
-      const name = parts.pop()
-      let folder = root
-      parts.forEach((part) => {
-        folder.folders[part] ||= { folders: {}, files: [] }
-        folder = folder.folders[part]
-      })
-      folder.files.push({ ...file, name })
-    })
-  return root
-}
-
-function getFolderStats(node) {
-  return Object.values(node.folders).reduce(
-    (total, folder) => {
-      const nested = getFolderStats(folder)
-      return { files: total.files + nested.files, size: total.size + nested.size }
-    },
-    {
-      files: node.files.filter(isPlayableFile).length,
-      size: node.files.reduce((total, file) => total + (Number(file.size) || 0), 0),
-    },
-  )
-}
-
-function formatDuration(ms) {
-  if (!ms || isNaN(ms)) return '--:--'
-  const total = Math.floor(Number(ms) / 1000)
-  const m = Math.floor(total / 60)
-  const s = total % 60
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
 function getSpotifyTrackId(url) {
   if (!url) return null
   try {
@@ -213,243 +180,9 @@ function matchesLibraryFile(track, file) {
   return Boolean(title && path.includes(title))
 }
 
-function StatusDot({ ok }) {
-  return (
-    <span className="relative flex h-2 w-2">
-      {ok && (
-        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#FFFFFF] opacity-60" />
-      )}
-      <span
-        className={`relative inline-flex h-2 w-2 rounded-full ${ok ? 'bg-[#FFFFFF]' : 'bg-[#6B7280]'}`}
-      />
-    </span>
-  )
-}
-
-function Chip({ tone = 'neutral', children }) {
-  const tones = {
-    neutral: 'bg-[#21242F] text-[#8D93A6] border-[#2C303D]',
-    amber: 'bg-[#FFFFFF]/10 text-[#FFFFFF] border-[#FFFFFF]/30',
-    teal: 'bg-[#FFFFFF]/10 text-[#FFFFFF] border-[#FFFFFF]/30',
-    coral: 'bg-[#6B7280]/10 text-[#6B7280] border-[#6B7280]/30',
-  }
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] leading-5 ${tones[tone]}`}
-      style={{ fontFamily: FONT_MONO }}
-    >
-      {children}
-    </span>
-  )
-}
-
-function Pagination({ page, total, pageSize, onChange }) {
-  const pages = Math.ceil(total / pageSize)
-  if (pages <= 1) return null
-  return (
-    <div className="flex items-center justify-between border-t border-[#2C303D] bg-[#0D0F16] px-3 py-2 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-      <span>página {page} de {pages} · {total} archivos</span>
-      <div className="flex gap-1">
-        <button disabled={page === 1} onClick={() => onChange(page - 1)} className="rounded border border-[#2C303D] px-2 py-1 disabled:opacity-30">anterior</button>
-        <button disabled={page === pages} onClick={() => onChange(page + 1)} className="rounded border border-[#2C303D] px-2 py-1 disabled:opacity-30">siguiente</button>
-      </div>
-    </div>
-  )
-}
-
-function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, formatSize, onDelete, dragDir, onMoveStart }) {
-  const audioRef = useRef(null)
-  const [playing, setPlaying] = useState(false)
-  const [duration, setDuration] = useState(0)
-  const [currentTime, setCurrentTime] = useState(0)
-  const extension = (file.name.split('.').pop() || 'archivo').toUpperCase()
-
-  const togglePlayback = async () => {
-    if (!audioRef.current) return
-    if (audioRef.current.paused) {
-      try {
-        await audioRef.current.play()
-        setPlaying(true)
-      } catch {}
-    } else {
-      audioRef.current.pause()
-      setPlaying(false)
-    }
-  }
-
-  const seek = (event) => {
-    const nextTime = Number(event.target.value)
-    if (audioRef.current) audioRef.current.currentTime = nextTime
-    setCurrentTime(nextTime)
-  }
-
-  return (
-    <div
-      draggable={Boolean(dragDir)}
-      onDragStart={(event) => {
-        if (dragDir) {
-          event.dataTransfer.effectAllowed = 'move'
-          event.dataTransfer.setData('application/x-soulseek-file', JSON.stringify({ dir: dragDir, path: file.path }))
-        }
-        onMoveStart?.(event)
-      }}
-      className="cursor-grab rounded-lg border border-[#2C303D] bg-[#161822] p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.14)] active:cursor-grabbing"
-    >
-      <div className="flex items-start gap-2">
-        <button
-          onClick={togglePlayback}
-          aria-label={playing ? `Pausar ${file.name}` : `Reproducir ${file.name}`}
-          className="flex h-8 w-8 min-h-8 min-w-8 shrink-0 aspect-square items-center justify-center rounded-full p-0 leading-none bg-[#FFFFFF] text-xs font-semibold text-[#161822] transition-transform hover:scale-105"
-        >
-          {playing ? '||' : '▶'}
-        </button>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-[#E9EAF0]" title={file.path}>{file.name}</p>
-          <div className="mt-1 flex items-center gap-2 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-            <span>{extension}</span>
-            <span className="text-[#565C6E]">·</span>
-            <span>{duration ? formatDuration(duration * 1000) : '--:--'}</span>
-            <span className="text-[#565C6E]">·</span>
-            <span>{formatSize(file.size)}</span>
-          </div>
-        </div>
-        {onDownload ? (
-          <button
-            onClick={() => onDownload(file.path)}
-            className="shrink-0 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[10px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
-          >
-            descargar
-          </button>
-        ) : downloadUrl ? (
-          <a
-            href={downloadUrl}
-            className="shrink-0 rounded border border-[#2C303D] px-2 py-1 text-[10px] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
-          >
-            descargar
-          </a>
-        ) : null}
-        <button
-          onClick={() => {
-            if (audioRef.current) {
-              audioRef.current.pause()
-              audioRef.current.removeAttribute('src')
-              audioRef.current.load()
-            }
-            onDelete(file.path)
-          }}
-          className="shrink-0 rounded border border-[#6B7280]/40 px-2 py-1 text-[10px] text-[#8D93A6] transition-colors hover:border-[#6B7280] hover:text-[#E9EAF0]"
-        >
-          borrar
-        </button>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <span className="text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>{formatDuration(currentTime * 1000)}</span>
-        <input
-          type="range"
-          min="0"
-          max={duration || 0}
-          step="0.1"
-          value={Math.min(currentTime, duration || 0)}
-          onChange={seek}
-          className="h-1 min-w-0 flex-1 cursor-pointer accent-white"
-          aria-label="Posición de reproducción"
-        />
-        <span className="text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>{formatDuration(duration * 1000)}</span>
-      </div>
-      <audio
-        ref={audioRef}
-        src={streamUrl}
-        preload="metadata"
-        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
-        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime || 0)}
-        onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
-        onEnded={() => {
-          setPlaying(false)
-          setCurrentTime(0)
-        }}
-        className="hidden"
-      />
-    </div>
-  )
-}
-
-function StatusItem({ label, description, ready, pending = false }) {
-  const state = pending ? 'Pendiente' : ready ? 'Correcto' : 'Revisar'
-  const color = pending
-    ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
-    : ready
-      ? 'border-blue-400/40 bg-blue-400/10 text-blue-200'
-      : 'border-red-400/40 bg-red-400/10 text-red-200'
-  return (
-    <div className="rounded-lg border border-slate-600 bg-slate-900/40 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-slate-100">{label}</h3>
-          <p className="mt-1 text-sm leading-relaxed text-slate-300">{description}</p>
-        </div>
-        <span className={`shrink-0 rounded-full border px-3 py-1 text-sm font-semibold ${color}`}>{state}</span>
-      </div>
-    </div>
-  )
-}
-
-function ConfigurationStatus({ config, diagnostics, backendOnline }) {
-  const status = diagnostics?.configuration
-  const hasStatus = Boolean(status)
-  const spotifyReady = hasStatus
-    ? Boolean(status.spotify?.clientIdConfigured && status.spotify?.clientSecretConfigured)
-    : Boolean(config?.spotify_client_id && config?.spotify_client_secret_configured)
-  const slskdReady = hasStatus
-    ? Boolean(status.slskd?.reachable && status.slskd?.apiKeyConfigured)
-    : false
-  const downloadsReady = hasStatus
-    ? Boolean(status.downloads?.exists)
-    : Boolean(config?.downloads_dir)
-
-  return (
-    <section className="mb-8 rounded-xl border border-slate-600 bg-slate-800 p-5 sm:p-6">
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-100">Estado de la configuración</h2>
-          <p className="mt-1 text-sm leading-relaxed text-slate-300">
-            Aquí puedes confirmar rápidamente si todo está listo antes de buscar o descargar.
-          </p>
-        </div>
-        <span className={`rounded-full border px-3 py-1 text-sm font-semibold ${backendOnline ? 'border-blue-400/40 bg-blue-400/10 text-blue-200' : 'border-red-400/40 bg-red-400/10 text-red-200'}`}>
-          Backend: {backendOnline ? 'conectado' : 'sin respuesta'}
-        </span>
-      </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <StatusItem
-          label="Spotify"
-          description={spotifyReady ? 'Credenciales configuradas. Puedes cargar playlists.' : 'Falta el Client ID o Client Secret en la configuración.'}
-          ready={spotifyReady}
-          pending={!hasStatus}
-        />
-        <StatusItem
-          label="Soulseek / slskd"
-          description={slskdReady ? `Servicio conectado en ${status.slskd.url}.` : 'El servicio no responde o falta la API key. Revisa slskd.exe y su URL.'}
-          ready={slskdReady}
-          pending={!hasStatus}
-        />
-        <StatusItem
-          label="Carpeta de descargas"
-          description={downloadsReady ? (status?.downloads?.path || config?.downloads_dir) : 'La carpeta todavía no existe o no está configurada.'}
-          ready={downloadsReady}
-          pending={!hasStatus}
-        />
-      </div>
-      {status?.slskd && !status.slskd.reachable && (
-        <p className="mt-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm leading-relaxed text-amber-100">
-          Para habilitar las búsquedas, inicia slskd o configura la ruta de <strong>slskd.exe</strong> en Configuración local y guarda los cambios.
-        </p>
-      )}
-      {config?.slskd_path && status?.slskd && !status.slskd.executableExists && (
-        <p className="mt-3 text-sm text-red-200">La ruta configurada de slskd.exe no existe: {config.slskd_path}</p>
-      )}
-    </section>
-  )
+function trackIdentity(track) {
+  return getSpotifyTrackId(track.spotify_url)
+    || `${normalizeSearchText(track.artists)}:${normalizeSearchText(track.track_name)}`
 }
 
 const TAB_PATHS = {
@@ -467,7 +200,7 @@ function tabFromPath(pathname) {
 function App() {
   const [initialPlaylist] = useState(loadLastPlaylist)
   const [url, setUrl] = useState(() => initialPlaylist.url || '')
-  const [outputFolderName, setOutputFolderName] = useState('')
+  const [outputFolderName, setOutputFolderName] = useState(() => getOutputFolderPreference(initialPlaylist.url) ?? initialPlaylist.outputFolderName ?? '')
   const [tracks, setTracks] = useState(() => initialPlaylist.tracks || [])
   const [loading, setLoading] = useState(false)
   const [currentPath, setCurrentPath] = useState(() => window.location.pathname)
@@ -479,9 +212,11 @@ function App() {
     loadSearchCache(initialPlaylist.url || '', initialPlaylist.tracks || [])
   )
   const [expandedSearches, setExpandedSearches] = useState(new Set())
+  const [collapsedSearches, setCollapsedSearches] = useState(new Set())
   const [urlHistory, setUrlHistory] = useState(loadHistory)
   const [activePreview, setActivePreview] = useState(null)
   const [downloads, setDownloads] = useState({})
+  const [manualDownloadedTracks, setManualDownloadedTracks] = useState(() => new Set())
   const [selected, setSelected] = useState(new Set())
   const [searchPreferences] = useState(loadSearchPreferences)
   const [pickMode, setPickMode] = useState(() => searchPreferences.pickMode)
@@ -490,13 +225,16 @@ function App() {
   const [spotifyAuth, setSpotifyAuth] = useState({ status: 'not_configured' })
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
-  const [playlistSearch, setPlaylistSearch] = useState('')
   const [savingConfig, setSavingConfig] = useState(false)
   const [diagnostics, setDiagnostics] = useState(null)
-  const [libraryPage, setLibraryPage] = useState(1)
   const [previewPage, setPreviewPage] = useState(1)
+  const [newLibraryFolderName, setNewLibraryFolderName] = useState('')
+  const [dragOverLibraryFolder, setDragOverLibraryFolder] = useState(null)
+  const [completedTransfersOpen, setCompletedTransfersOpen] = useState(false)
   const previewTimer = useRef(null)
   const downloadTimers = useRef({})
+  const downloadToastIds = useRef({})
+  const downloadTaskSequence = useRef(0)
   const logRef = useRef(null)
   const autoSearchStarted = useRef((initialPlaylist.tracks || []).length > 0)
   const autoSearchTimeouts = useRef([])
@@ -507,19 +245,6 @@ function App() {
     window.history.pushState({}, '', path)
     setCurrentPath(path)
     window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
-  const startNewPlaylist = () => {
-    setUrl('')
-    setOutputFolderName('')
-    setTracks([])
-    setSearches([])
-    setSelected(new Set())
-    setDownloads({})
-    setLibraryPage(1)
-    setPreviewPage(1)
-    autoSearchStarted.current = false
-    navigate('/')
   }
 
   useEffect(() => {
@@ -552,9 +277,9 @@ function App() {
   const startSpotifyAuth = async () => {
     try {
       setSpotifyAuth(await requestJson('/api/spotify/auth/start', { method: 'POST' }))
-      alert('Se abrió Spotify en el navegador. Completa la autorización y vuelve aquí.')
+      toast.info('Se abrió Spotify en el navegador. Completa la autorización y vuelve aquí.')
     } catch (err) {
-      alert('No se pudo iniciar Spotify: ' + err.message)
+      toast.error('No se pudo iniciar Spotify: ' + err.message)
     }
   }
 
@@ -562,10 +287,9 @@ function App() {
     try {
       const data = await requestJson('/api/spotify/playlists')
       setSpotifyPlaylists(data.playlists || [])
-      setPlaylistSearch('')
       setPlaylistPickerOpen(true)
     } catch (err) {
-      alert('No se pudieron cargar tus playlists: ' + err.message)
+      toast.error('No se pudieron cargar tus playlists: ' + err.message)
     }
   }
 
@@ -579,8 +303,9 @@ function App() {
       const data = await response.json()
       if (!response.ok || data.error) throw new Error(data.error || 'No se pudo borrar el archivo')
       await fetchDiagnostics()
+      toast.success('Archivo eliminado')
     } catch (err) {
-      alert(`No se pudo borrar: ${err.message}`)
+      toast.error(`No se pudo borrar: ${err.message}`)
     }
   }
 
@@ -589,18 +314,25 @@ function App() {
     try {
       await request('/api/cleanup', { method: 'POST' })
       fetchDiagnostics()
-    } catch {}
+      toast.success('Temporales e incompletos eliminados')
+    } catch (err) {
+      toast.error('No se pudieron limpiar los temporales: ' + err.message)
+    }
   }
 
   const cancelTransfer = async (username, filename) => {
     try {
-      await request('/api/cancel', {
+      const response = await request('/api/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, filename }),
       })
-      fetchDiagnostics()
-    } catch {}
+      if (!response.ok) throw new Error(`slskd ${response.status}`)
+      await fetchDiagnostics()
+      toast.success(`Transferencia cancelada: ${filename}`)
+    } catch (err) {
+      toast.error(`No se pudo cancelar la transferencia: ${err.message}`)
+    }
   }
 
   useEffect(() => {
@@ -619,9 +351,31 @@ function App() {
   // Guardar playlist actual cuando cambia
   useEffect(() => {
     if (url && tracks.length > 0) {
-      localStorage.setItem('lastPlaylist', JSON.stringify({ url, tracks }))
+      localStorage.setItem('lastPlaylist', JSON.stringify({ url, tracks, outputFolderName }))
     }
-  }, [url, tracks])
+  }, [url, tracks, outputFolderName])
+
+  useEffect(() => {
+    if (!url) return
+    const preferences = loadOutputFolderPreferences()
+    preferences[url] = outputFolderName
+    localStorage.setItem(OUTPUT_FOLDER_PREFERENCES_KEY, JSON.stringify(preferences))
+  }, [url, outputFolderName])
+
+  useEffect(() => {
+    if (!url) return undefined
+    let cancelled = false
+    requestJson(`/api/playlist/status?playlist_key=${encodeURIComponent(url)}`)
+      .then((data) => {
+        if (cancelled) return
+        const statuses = data.statuses || {}
+        setManualDownloadedTracks(new Set(Object.entries(statuses).filter(([, downloaded]) => downloaded).map(([trackKey]) => trackKey)))
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [url])
 
   useEffect(() => {
     if (url && searches.length > 0) saveSearchCache(url, searches)
@@ -679,8 +433,9 @@ function App() {
         body: JSON.stringify(data),
       })
       setConfig(saved)
+      toast.success('Configuración guardada')
     } catch (err) {
-      alert('Error al guardar configuración: ' + err.message)
+      toast.error('Error al guardar configuración: ' + err.message)
     } finally {
       setSavingConfig(false)
     }
@@ -702,7 +457,7 @@ function App() {
       })
       const data = await r.json()
       if (!r.ok) {
-        alert(data.error || 'Error')
+        toast.error(data.error || 'Error')
         return
       }
       setSearches((prev) => [
@@ -719,7 +474,7 @@ function App() {
         },
       ])
     } catch (err) {
-      alert('Error: ' + err.message)
+      toast.error('Error: ' + err.message)
     }
   }, [tracks])
 
@@ -793,8 +548,12 @@ function App() {
     return () => clearInterval(iv)
   }, [])
 
-  const preview = async (e) => {
-    e.preventDefault()
+  const loadPlaylist = async (sourceUrl) => {
+    const targetUrl = (sourceUrl || '').trim()
+    if (!targetUrl || loading) return
+    const savedOutputFolder = getOutputFolderPreference(targetUrl)
+    setUrl(targetUrl)
+    setOutputFolderName(savedOutputFolder ?? '')
     autoSearchTimeouts.current.forEach(clearTimeout)
     autoSearchTimeouts.current = []
     setLoading(true)
@@ -802,6 +561,7 @@ function App() {
     setTracks([])
     setSearches([])
     setExpandedSearches(new Set())
+    setCollapsedSearches(new Set())
     setDownloads({})
     Object.values(downloadTimers.current).forEach(clearInterval)
     downloadTimers.current = {}
@@ -810,23 +570,23 @@ function App() {
       const r = await request('/api/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: targetUrl }),
       })
       const data = await r.json()
       if (!r.ok) throw new Error(data.error || 'Error')
       const loaded = data.tracks || []
-      setOutputFolderName(data.playlist_name || '')
-      const cachedSearches = loadSearchCache(url, loaded)
+      if (savedOutputFolder === undefined) setOutputFolderName(data.playlist_name || '')
+      const cachedSearches = loadSearchCache(targetUrl, loaded)
       searchesRef.current = cachedSearches
       setSearches(cachedSearches)
       setTracks(loaded)
       setSelected(new Set(loaded.map((_, i) => i)))
-      if (url) {
+      if (data.source !== 'soulseek') {
         const historyItem = {
-          url,
-          name: data.playlist_name || getHistoryLabel(url, 0),
+          url: targetUrl,
+          name: data.playlist_name || getHistoryLabel(targetUrl, 0),
         }
-        const next = [historyItem, ...urlHistory.filter((item) => item.url !== url)]
+        const next = [historyItem, ...urlHistory.filter((item) => item.url !== targetUrl)]
         setUrlHistory(next)
         saveHistory(next)
       }
@@ -837,8 +597,13 @@ function App() {
     }
   }
 
+  const preview = (event) => {
+    event.preventDefault()
+    loadPlaylist(url)
+  }
+
   const copy = (q) =>
-    navigator.clipboard.writeText(q).then(() => alert('Copiado: ' + q))
+    navigator.clipboard.writeText(q).then(() => toast.success('Copiado: ' + q)).catch(() => toast.error('No se pudo copiar'))
 
   const updateQuery = (i, newQuery) => {
     setTracks((prev) =>
@@ -862,50 +627,42 @@ function App() {
     }
   }
 
-  const formatSize = (bytes) => {
-    if (bytes == null || bytes === 0) return ''
-    const units = ['B', 'KB', 'MB', 'GB', 'TB']
-    let i = 0
-    let n = Number(bytes)
-    while (n >= 1024 && i < units.length - 1) {
-      n /= 1024
-      i++
-    }
-    return `${n.toFixed(2)} ${units[i]}`
+  const getTrackDownloads = (i) => {
+    const value = downloads[i]
+    if (Array.isArray(value)) return value
+    return value ? [value] : []
   }
 
-  const formatSpeed = (bps) => {
-    if (!bps) return ''
-    const units = ['B/s', 'KB/s', 'MB/s', 'GB/s']
-    let i = 0
-    let n = Number(bps)
-    while (n >= 1024 && i < units.length - 1) {
-      n /= 1024
-      i++
-    }
-    return `${n.toFixed(1)} ${units[i]}`
-  }
-
-  const setDl = (i, patch) =>
-    setDownloads((prev) => ({ ...prev, [i]: { ...prev[i], ...patch } }))
+  const updateDownloadTask = (i, taskId, patch) =>
+    setDownloads((prev) => {
+      const current = Array.isArray(prev[i]) ? prev[i] : prev[i] ? [prev[i]] : []
+      return {
+        ...prev,
+        [i]: current.map((task) => task.id === taskId ? { ...task, ...patch } : task),
+      }
+    })
 
   const enqueueDownload = async (i, res) => {
     if (!res) return
     const downloadFolderName = outputFolderName.trim()
-    stopDownloadTimer(i)
-    setDownloads((prev) => ({
-      ...prev,
-      [i]: {
-        username: res.username,
-        filename: res.filename,
-        size: res.size,
-        folder_name: downloadFolderName,
-        state: 'encolando',
-        percent: 0,
-        path: null,
-        error: null,
-      },
-    }))
+    const taskId = `${i}-${downloadTaskSequence.current++}`
+    const task = {
+      id: taskId,
+      username: res.username,
+      filename: res.filename,
+      size: res.size,
+      folder_name: downloadFolderName,
+      state: 'encolando',
+      percent: 0,
+      path: null,
+      error: null,
+    }
+    setDownloads((prev) => {
+      const current = Array.isArray(prev[i]) ? prev[i] : prev[i] ? [prev[i]] : []
+      return { ...prev, [i]: [...current, task] }
+    })
+    const downloadToastId = toast.loading(`Descargando ${res.filename}`)
+    downloadToastIds.current[taskId] = downloadToastId
     try {
       const r = await request('/api/download', {
         method: 'POST',
@@ -922,53 +679,74 @@ function App() {
       })
       const data = await r.json()
       if (data.error) {
-        setDl(i, { state: 'error', error: data.error })
+        updateDownloadTask(i, taskId, { state: 'error', error: data.error })
+        toast.update(downloadToastId, { render: `Error de descarga: ${data.error}`, type: 'error', isLoading: false, autoClose: 5000 })
+        delete downloadToastIds.current[taskId]
         return
       }
-      setDl(i, { state: 'descargando' })
-      downloadTimers.current[i] = setInterval(async () => {
+      updateDownloadTask(i, taskId, { state: 'descargando' })
+      downloadTimers.current[taskId] = setInterval(async () => {
         try {
           const st = await request(
             `/api/download/status?username=${encodeURIComponent(res.username)}&filename=${encodeURIComponent(res.filename)}&folder_name=${encodeURIComponent(downloadFolderName)}`
           )
           const d = await st.json()
-          if (d.path) {
-            stopDownloadTimer(i)
-            setDl(i, { state: 'completado', path: d.path, percent: 100 })
+          const downloadState = String(d.state || '').toLowerCase()
+          const percentComplete = Number(d.percentComplete || 0)
+          const isCancelled = downloadState.includes('cancelled') || downloadState.includes('canceled')
+          const isComplete = !isCancelled && (Boolean(d.path) || percentComplete >= 100 || ['completed', 'complete', 'succeeded', 'finished'].some((state) => downloadState.includes(state)))
+          if (isComplete) {
+            stopDownloadTimer(taskId)
+            updateDownloadTask(i, taskId, { state: 'completado', path: d.path || null, percent: 100 })
+            collapseTrackResults(i)
+            toast.update(downloadToastId, { render: `Descarga completada: ${res.filename}`, type: 'success', isLoading: false, autoClose: 3500 })
+            delete downloadToastIds.current[taskId]
             fetchDiagnostics()
-          } else if (
-            d.state === 'error' ||
-            d.state === 'Errored' ||
-            d.state === 'Cancelled'
-          ) {
-            stopDownloadTimer(i)
-            setDl(i, { state: 'error', error: d.error || d.state })
+          } else if (isCancelled || downloadState === 'error' || downloadState === 'errored' || downloadState === 'cancelled') {
+            stopDownloadTimer(taskId)
+            const error = d.error || d.state
+            updateDownloadTask(i, taskId, isCancelled ? { state: 'cancelado', error } : { state: 'error', error })
+            toast.update(downloadToastId, {
+              render: isCancelled ? `Descarga cancelada: ${res.filename}` : `Error de descarga: ${error}`,
+              type: isCancelled ? 'info' : 'error',
+              isLoading: false,
+              autoClose: 4000,
+            })
+            delete downloadToastIds.current[taskId]
           } else {
-            setDl(i, { percent: d.percentComplete || 0 })
+            updateDownloadTask(i, taskId, { percent: d.percentComplete || 0 })
           }
         } catch {}
       }, 2000)
     } catch (err) {
-      setDl(i, { state: 'error', error: err.message })
+      updateDownloadTask(i, taskId, { state: 'error', error: err.message })
+      toast.update(downloadToastId, { render: `Error de descarga: ${err.message}`, type: 'error', isLoading: false, autoClose: 5000 })
+      delete downloadToastIds.current[taskId]
     }
   }
 
-  const cancelTrackDownload = async (i) => {
-    const dl = downloads[i]
-    stopDownloadTimer(i)
-    setDownloads((prev) => {
-      const next = { ...prev }
-      delete next[i]
-      return next
-    })
-    if (!dl) return
+  const cancelTrackDownload = async (taskId) => {
+    const task = Object.values(downloads).flatMap((value) => Array.isArray(value) ? value : value ? [value] : []).find((item) => item.id === taskId)
+    stopDownloadTimer(taskId)
+    if (!task) return
+    const trackIndex = Number(taskId.split('-')[0])
+    updateDownloadTask(trackIndex, taskId, { state: 'cancelado', error: 'Cancelado por el usuario' })
+    const downloadToastId = downloadToastIds.current[taskId]
+    if (downloadToastId) {
+      toast.update(downloadToastId, { render: `Cancelando descarga: ${task.filename}`, type: 'info', isLoading: false, autoClose: 2500 })
+      delete downloadToastIds.current[taskId]
+    }
     try {
-      await request('/api/cancel', {
+      const response = await request('/api/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: dl.username, filename: dl.filename }),
+        body: JSON.stringify({ username: task.username, filename: task.filename }),
       })
-    } catch {}
+      if (!response.ok) throw new Error(`slskd ${response.status}`)
+      toast.success(`Descarga cancelada: ${task.filename}`)
+    } catch (err) {
+      toast.error(`No se pudo cancelar la descarga: ${err.message}`)
+    }
   }
 
   const toggleSelect = (i) =>
@@ -978,6 +756,9 @@ function App() {
       else next.add(i)
       return next
     })
+
+  const selectAll = (checked) =>
+    setSelected(checked ? new Set(tracks.map((_, i) => i)) : new Set())
 
   const downloadSelected = () => {
     const list = tracks.map((_, i) => i).filter((i) => selected.has(i))
@@ -1011,6 +792,10 @@ function App() {
 
   const savePreviewToLibrary = async () => {
     if (!activePreview?.path || activePreview.savedPath) return
+    if (!outputFolderName.trim()) {
+      toast.info('Escribe una carpeta de playlist para guardar el preview')
+      return
+    }
     try {
       const data = await requestJson('/api/preview/save', {
         method: 'POST',
@@ -1026,12 +811,33 @@ function App() {
       setActivePreview((current) => ({ ...current, savedPath: data.path }))
       setOutputFolderName(data.folder || outputFolderName)
       fetchDiagnostics()
+      toast.success('Preview guardado en la biblioteca')
     } catch (err) {
-      alert('No se pudo guardar el preview: ' + err.message)
+      toast.error('No se pudo guardar el preview: ' + err.message)
+    }
+  }
+
+  const discardActivePreview = async () => {
+    if (!activePreview?.path || activePreview.savedPath) return
+    try {
+      await requestJson('/api/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: activePreview.path, dir: 'previews' }),
+      })
+      await fetchDiagnostics()
+      setActivePreview(null)
+      toast.success('Preview descartado y eliminado')
+    } catch (err) {
+      toast.error('No se pudo descartar el preview: ' + err.message)
     }
   }
 
   const saveTemporaryPreviewToLibrary = async (path) => {
+    if (!outputFolderName.trim()) {
+      toast.info('Escribe una carpeta de playlist para mover el preview')
+      return
+    }
     try {
       await requestJson('/api/preview/save', {
         method: 'POST',
@@ -1039,12 +845,48 @@ function App() {
         body: JSON.stringify({ path, folder_name: outputFolderName }),
       })
       await fetchDiagnostics()
+      toast.success('Preview movido a la biblioteca')
     } catch (err) {
-      alert('No se pudo mover a la biblioteca: ' + err.message)
+      toast.error('No se pudo mover a la biblioteca: ' + err.message)
+    }
+  }
+
+  const createLibraryFolder = async () => {
+    const folderName = newLibraryFolderName.trim()
+    if (!folderName) return
+    try {
+      await requestJson('/api/library/folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_name: folderName }),
+      })
+      setNewLibraryFolderName('')
+      await fetchDiagnostics()
+      toast.success(`Playlist creada: ${folderName}`)
+    } catch (err) {
+      toast.error('No se pudo crear la carpeta: ' + err.message)
+    }
+  }
+
+  const movePreviewToFolder = async (path, targetFolder) => {
+    try {
+      await requestJson('/api/preview/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, folder_name: targetFolder }),
+      })
+      await fetchDiagnostics()
+      toast.success(`Preview movido a ${targetFolder}`)
+    } catch (err) {
+      toast.error('No se pudo mover el preview al playlist: ' + err.message)
     }
   }
 
   const moveLibraryFile = async (source, targetFolder) => {
+    if (source.dir === 'previews') {
+      await movePreviewToFolder(source.path, targetFolder)
+      return
+    }
     try {
       await requestJson('/api/library/move', {
         method: 'POST',
@@ -1056,75 +898,10 @@ function App() {
         }),
       })
       await fetchDiagnostics()
+      toast.success(`Archivo movido${targetFolder ? ` a ${targetFolder}` : ''}`)
     } catch (err) {
-      alert('No se pudo mover el archivo: ' + err.message)
+      toast.error('No se pudo mover el archivo: ' + err.message)
     }
-  }
-
-  const renderDownloadTree = (node, level = 0, fullNode = node, folderPath = '') => {
-    const folders = Object.entries(node.folders).sort(([a], [b]) => a.localeCompare(b))
-    const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
-    return (
-      <div className={level > 0 ? 'ml-3 border-l border-[#2C303D] pl-2' : ''}>
-        {folders.map(([name, folder]) => {
-          const sourceFolder = fullNode.folders[name] || folder
-          const stats = getFolderStats(sourceFolder)
-          const destinationFolder = folderPath ? `${folderPath}/${name}` : name
-          return (
-            <details
-              key={name}
-              open={level === 0}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault()
-                try {
-                  const source = JSON.parse(event.dataTransfer.getData('application/x-soulseek-file'))
-                  if (source?.path) moveLibraryFile(source, destinationFolder)
-                } catch {}
-              }}
-              className="mb-2 overflow-hidden rounded-lg border border-[#2C303D] bg-[#161822]"
-            >
-              <summary className="flex cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-[#E9EAF0] hover:bg-[#1A1D28]">
-                <span className="min-w-0 truncate text-sm font-medium">{name}</span>
-                <span className="shrink-0 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-                  {stats.files} canciones · {formatSize(stats.size)}
-                </span>
-              </summary>
-              {renderDownloadTree(folder, level + 1, sourceFolder, destinationFolder)}
-            </details>
-          )
-        })}
-        {files.map((file) => (
-          isPlayableFile(file) ? (
-            <LibraryAudioCard
-              key={file.path}
-              file={file}
-              streamUrl={storedFileStreamUrl('downloads', file.path)}
-              formatSize={formatSize}
-              dragDir="downloads"
-              onDelete={(path) => {
-                if (confirm(`¿Borrar ${path}?`)) deleteItem(path, 'downloads')
-              }}
-            />
-          ) : (
-            <div key={file.path} className="rounded-lg border border-[#2C303D] bg-[#161822] p-3">
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-[13px] text-[#E9EAF0]" title={file.path}>{file.name}</span>
-                <span className="shrink-0 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>{formatSize(file.size)}</span>
-                <button
-                  onClick={() => {
-                    if (confirm(`¿Borrar ${file.path}?`)) deleteItem(file.path, 'downloads')
-                  }}
-                  className="shrink-0 rounded border border-[#6B7280]/40 px-2 py-1 text-[10px] text-[#8D93A6] hover:border-[#6B7280] hover:text-[#E9EAF0]"
-                >
-                  borrar
-                </button>
-              </div>
-            </div>
-          )
-        ))}
-      </div>
-    )
   }
 
   const startPreview = async (res, trackIndex) => {
@@ -1247,190 +1024,44 @@ function App() {
       return next
     })
 
-  const renderResults = (s, limit = RESULTS_PER_TRACK) => {
-    if (!s.raw) {
-      return (
-        <p className="px-1 py-2 text-sm text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-          esperando resultados&hellip;
-        </p>
-      )
+  const toggleCollapsedSearch = (searchId, isOpen) =>
+    setCollapsedSearches((prev) => {
+      const next = new Set(prev)
+      if (isOpen) next.delete(searchId)
+      else next.add(searchId)
+      return next
+    })
+
+  const collapseTrackResults = (trackIndex) => {
+    const search = searchesRef.current.find((item) => item.trackIndex === trackIndex)
+    if (!search?.searchId) return
+    setCollapsedSearches((prev) => {
+      if (prev.has(search.searchId)) return prev
+      const next = new Set(prev)
+      next.add(search.searchId)
+      return next
+    })
+  }
+
+  const refreshSearch = async (searchId) => {
+    const search = searchesRef.current.find((item) => item.searchId === searchId)
+    if (!search) return
+    try {
+      const data = await requestJson(`/api/search_soulseek/${searchId}`)
+      const results = data.results || []
+      setSearches((prev) => prev.map((item) => item.searchId === searchId
+        ? { ...item, raw: data, pollCount: (item.pollCount || 0) + 1, resultsCount: data.resultsCount ?? results.length, status: data.status || data.state || item.status }
+        : item
+      ))
+      toast.info('Resultados actualizados')
+    } catch (err) {
+      toast.error('No se pudieron refrescar los resultados: ' + err.message)
     }
-    const allResults = rankResults(s.raw.results || [], s.query, pickMode, formatPref)
-    const total = allResults.length
-    const expanded = expandedSearches.has(s.searchId)
+  }
 
-    if (s.raw.error || s.raw.status === 'error') {
-      return (
-        <div className="py-2">
-          <Chip tone="coral">
-            error · {typeof s.raw.error === 'string' ? s.raw.error : JSON.stringify(s.raw.error)}
-          </Chip>
-        </div>
-      )
-    }
-
-    const normalizedStatus = String(s.raw.status || s.raw.state || s.status || '').toLowerCase()
-    const terminalStatuses = new Set(['completed', 'complete', 'finished', 'failed', 'cancelled', 'canceled', 'error'])
-    const activeStatuses = new Set(['active', 'searching', 'inprogress', 'in_progress', 'pending', 'running', 'queued', 'started', 'buscando'])
-    const stillSearching =
-      !terminalStatuses.has(normalizedStatus) &&
-      (activeStatuses.has(normalizedStatus) || !normalizedStatus && (s.pollCount || 0) < 10)
-
-    if (!Array.isArray(allResults) || allResults.length === 0) {
-      return stillSearching ? (
-        <div className="py-2">
-          <Chip tone="amber">buscando resultados…</Chip>
-        </div>
-      ) : (
-        <p className="py-2 text-xs text-[#8D93A6]">
-          sin resultados
-        </p>
-      )
-    }
-
-    const results = expanded ? allResults : allResults.slice(0, limit)
-    const isBusy =
-      activePreview && !activePreview.error && activePreview.state !== 'completado'
-    const dl = downloads[s.trackIndex]
-    const dlActive = dl && !['completado', 'error'].includes(dl.state)
-    const bestPick = pickBest(allResults, pickMode, formatPref)
-    const isThisPreview = (res) =>
-      activePreview &&
-      activePreview.username === res.username &&
-      activePreview.filename === res.filename
-    const isThisDownload = (res) =>
-      dl &&
-      dl.username === res.username &&
-      dl.filename === res.filename
-
-    return (
-      <div className="space-y-1.5">
-        <p className="text-[11px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-          {results.length} de {total} resultado(s) únicos
-          {total > results.length ? ` · +${total - results.length} más` : ''}
-        </p>
-        {total > limit && (
-          <button
-            onClick={() => toggleExpandedSearch(s.searchId)}
-            className="mb-1 rounded border border-[#2C303D] px-2 py-1 text-[11px] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
-          >
-            {expanded ? 'mostrar menos' : `ver los ${total} resultados`}
-          </button>
-        )}
-        {results.map((res, i) => (
-          <div
-            key={`${res.username || 'unknown'}|${res.filename || res.path || i}|${res.size || 0}`}
-            className="fade-in rounded-md border border-[#2C303D] bg-[#0D0F16] p-2.5"
-            style={{ animationDelay: `${i * 60}ms` }}
-          >
-            <p className="truncate text-[13px] text-[#E9EAF0]" title={res.filename}>
-              {res === bestPick && (
-                <span className="mr-1.5 rounded bg-[#FFFFFF] px-1 py-0.5 text-[9px] font-semibold text-[#161822]">
-                  Recomendado
-                </span>
-              )}
-              {res.filename || res.file || res.name || res.path || `Resultado ${i + 1}`}
-            </p>
-            <p className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-              {res.username && <span>@{res.username}</span>}
-              {extOf(res) && <span>{extOf(res).toUpperCase()}</span>}
-              {res.size ? <span>{formatSize(res.size)}</span> : null}
-              {res.speed ? <span>{formatSpeed(res.speed)}</span> : null}
-              {res.bitrate ? <span>{Math.round(res.bitrate / 1000)} kbps</span> : null}
-            </p>
-            <div className="mt-2 flex gap-1.5">
-              <button
-                onClick={() => startPreview(res, s.trackIndex)}
-                disabled={isBusy}
-                className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-2 py-1 text-[11px] font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Escuchar
-              </button>
-              <button
-                onClick={() => enqueueDownload(s.trackIndex, res)}
-                disabled={isBusy || dlActive}
-                className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-2 py-1 text-[11px] font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Descargar
-              </button>
-            </div>
-            {isThisPreview(res) && (
-              <div className="mt-2">
-                {activePreview.state === 'encolando' && <Chip tone="amber">encolando</Chip>}
-                {activePreview.state === 'descargando' && <Chip tone="amber">cargando preview {Math.round(activePreview.percent || 0)}%</Chip>}
-                {activePreview.state === 'completado' && activePreview.path && (
-                  <>
-                    <audio
-                      controls
-                      src={activePreview.savedPath
-                        ? storedFileStreamUrl('downloads', activePreview.savedPath)
-                        : `/api/preview/stream?path=${encodeURIComponent(activePreview.path)}`}
-                      onTimeUpdate={(e) => {
-                        if (e.target.currentTime > 30) {
-                          e.target.currentTime = 0
-                          e.target.pause()
-                        }
-                      }}
-                      className="mt-1 h-8 w-full"
-                    />
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <button
-                        onClick={savePreviewToLibrary}
-                        disabled={Boolean(activePreview.savedPath)}
-                        className="rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10 disabled:cursor-default disabled:opacity-60"
-                      >
-                        {activePreview.savedPath ? 'Guardado en biblioteca' : 'Guardar en biblioteca'}
-                      </button>
-                      <a
-                        href={activePreview.savedPath
-                          ? storedFileUrl('downloads', activePreview.savedPath)
-                          : storedFileUrl('previews', activePreview.path)}
-                        className="inline-flex rounded border border-[#2C303D] px-2 py-1 text-[11px] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
-                      >
-                        Descargar archivo
-                      </a>
-                    </div>
-                  </>
-                )}
-                {activePreview.state === 'error' && (
-                  <Chip tone="coral">error · {activePreview.error}</Chip>
-                )}
-                {activePreview.state !== 'completado' && activePreview.state !== 'error' && (
-                  <button
-                    onClick={() => cancelPreview(res)}
-                    className="ml-2 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
-                  >
-                    Cancelar
-                  </button>
-                )}
-              </div>
-            )}
-            {isThisDownload(res) && (
-              <div className="mt-2">
-                {dl.state === 'encolando' && <Chip tone="amber">encolando</Chip>}
-                {dl.state === 'descargando' && (
-                  <Chip tone="amber">descargando {Math.round(dl.percent || 0)}%</Chip>
-                )}
-                {dl.state === 'completado' && dl.path && (
-                  <Chip tone="teal">guardado · {dl.path}</Chip>
-                )}
-                {dl.state === 'error' && (
-                  <Chip tone="coral">error · {dl.error}</Chip>
-                )}
-                {dl.state !== 'completado' && dl.state !== 'error' && (
-                  <button
-                    onClick={() => cancelTrackDownload(s.trackIndex)}
-                    className="ml-2 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
-                  >
-                    Cancelar
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    )
+  const cancelSearch = (searchId) => {
+    setSearches((prev) => prev.filter((item) => item.searchId !== searchId))
+    toast.info('Búsqueda cancelada')
   }
 
   const getTrackSearch = (i) => {
@@ -1447,335 +1078,105 @@ function App() {
       .some((file) => matchesLibraryFile(track, file))
   }
 
-  const renderTrackCard = (t, i) => {
-    const s = getTrackSearch(i)
-    const downloaded = isTrackDownloaded(t)
-    const spotifyTrackId = getSpotifyTrackId(t.spotify_url)
-    return (
-      <div
-        key={i}
-        className={`relative overflow-hidden fade-in rounded-lg border border-[#2C303D] bg-[#161822] p-4 ${downloaded ? 'border-[#6B7280]/60' : ''}`}
-        style={{ animationDelay: `${i * 40}ms` }}
-      >
-        <div className="flex items-start gap-3">
-          <div className="flex shrink-0 flex-col items-center gap-1.5">
-            <input
-              type="checkbox"
-              checked={selected.has(i)}
-              onChange={() => toggleSelect(i)}
-              title="Seleccionar pista"
-              className="h-3.5 w-3.5 cursor-pointer accent-white"
-            />
-            <div
-              className="flex h-8 w-8 items-center justify-center rounded-md bg-[#0D0F16] text-xs text-[#8D93A6]"
-              style={{ fontFamily: FONT_MONO }}
-            >
-              {String(i + 1).padStart(2, '0')}
-            </div>
-          </div>
-          <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[15px] font-medium leading-tight text-[#E9EAF0]">
-              {t.track_name}
-            </h3>
-            <p className="truncate text-xs text-[#8D93A6]">
-              {t.artists}
-              {t.album ? ` · ${t.album}` : ''}
-            </p>
-            <p className="mt-0.5 text-[11px] text-[#565C6E]" style={{ fontFamily: FONT_MONO }}>
-              {formatDuration(t.duration_ms)}
-            </p>
-          </div>
-        </div>
-
-        {downloads[i] && (
-          <div className="mt-2">
-            {downloads[i].state === 'encolando' && <Chip tone="amber">encolando</Chip>}
-            {downloads[i].state === 'descargando' && (
-              <Chip tone="amber">descargando {Math.round(downloads[i].percent || 0)}%</Chip>
-            )}
-            {downloads[i].state === 'completado' && (
-              <Chip tone="teal">guardado{downloads[i].path ? ` · ${downloads[i].path}` : ''}</Chip>
-            )}
-            {downloads[i].state === 'error' && (
-              <Chip tone="coral">error · {downloads[i].error}</Chip>
-            )}
-          </div>
-        )}
-
-        {spotifyTrackId && (
-          <div className="mt-3">
-            <iframe
-              src={`https://open.spotify.com/embed/track/${spotifyTrackId}`}
-              width="100%"
-              height="80"
-              style={{ border: 0, borderRadius: '8px' }}
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-              loading="lazy"
-            />
-          </div>
-        )}
-
-        <div className="mt-3 flex items-center gap-2">
-          <input
-            type="text"
-            value={t.search_query}
-            onChange={(e) => updateQuery(i, e.target.value)}
-            placeholder="query para Soulseek"
-            className="min-w-0 flex-1 rounded border border-[#2C303D] bg-[#0D0F16] px-2.5 py-1.5 text-xs text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
-            style={{ fontFamily: FONT_MONO }}
-          />
-          <button
-            onClick={() => copy(t.search_query)}
-            title="Copiar búsqueda"
-            className="shrink-0 rounded border border-[#2C303D] px-2.5 py-1.5 text-xs text-[#8D93A6] transition-colors hover:border-[#3A3F4E] hover:text-[#E9EAF0]"
-          >
-            copiar
-          </button>
-          <button
-            onClick={() => searchTrack(i, t.search_query)}
-            className="shrink-0 rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-2.5 py-1.5 text-xs text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20"
-          >
-            buscar
-          </button>
-        </div>
-
-        {s && (
-          <div className="mt-3 border-t border-[#2C303D] pt-3">
-            {renderResults(s, RESULTS_PER_TRACK)}
-          </div>
-        )}
-        {downloaded && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#10121A]/70 p-4 text-center backdrop-blur-[2px]">
-            <span className="rounded border border-[#8D93A6]/50 bg-[#161822]/90 px-3 py-2 text-xs font-medium uppercase tracking-[0.12em] text-[#D5D7DE]">
-              Already downloaded this song
-            </span>
-          </div>
-        )}
-      </div>
-    )
+  const toggleManualDownloaded = async (track, trackIndex) => {
+    if (!url) return
+    const key = trackIdentity(track)
+    const wasManual = manualDownloadedTracks.has(key)
+    const downloaded = !wasManual
+    if (downloaded) collapseTrackResults(trackIndex)
+    setManualDownloadedTracks((current) => {
+      const next = new Set(current)
+      if (downloaded) next.add(key)
+      else next.delete(key)
+      return next
+    })
+    try {
+      await requestJson('/api/playlist/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playlist_key: url, track_key: key, downloaded }),
+      })
+      toast[downloaded ? 'success' : 'info'](downloaded ? `Marcada como descargada: ${track.track_name}` : `Marcada como pendiente: ${track.track_name}`)
+    } catch (err) {
+      setManualDownloadedTracks((current) => {
+        const next = new Set(current)
+        if (wasManual) next.add(key)
+        else next.delete(key)
+        return next
+      })
+      toast.error('No se pudo guardar el estado de la canción: ' + err.message)
+    }
   }
 
+  const selectHistory = (selectedUrl) => {
+    const saved = urlHistory.find((item) => item.url === selectedUrl)
+    if (saved) {
+      setUrl(saved.url)
+      setOutputFolderName(getOutputFolderPreference(saved.url) ?? saved.name)
+    }
+  }
+
+  const clearHistory = () => {
+    setUrlHistory([])
+    saveHistory([])
+  }
+
+  // ---- derived values for the library / temporales panels ----
   const libraryFiles = (diagnostics?.downloads || [])
     .filter(isLibraryFile)
     .sort((a, b) => a.path.localeCompare(b.path))
+  const libraryFolders = diagnostics?.download_directories || []
   const previewFiles = diagnostics?.previews || []
-  const libraryPages = Math.max(1, Math.ceil(libraryFiles.length / LIBRARY_PAGE_SIZE))
-  const previewPages = Math.max(1, Math.ceil(previewFiles.length / PREVIEW_PAGE_SIZE))
-  const currentLibraryPage = Math.min(libraryPage, libraryPages)
+  const previewPages = Math.max(1, Math.ceil(previewFiles.length / 12))
   const currentPreviewPage = Math.min(previewPage, previewPages)
-  const visibleLibraryFiles = libraryFiles.slice((currentLibraryPage - 1) * LIBRARY_PAGE_SIZE, currentLibraryPage * LIBRARY_PAGE_SIZE)
-  const visiblePreviewFiles = previewFiles.slice((currentPreviewPage - 1) * PREVIEW_PAGE_SIZE, currentPreviewPage * PREVIEW_PAGE_SIZE)
+  const visiblePreviewFiles = previewFiles.slice((currentPreviewPage - 1) * 12, currentPreviewPage * 12)
+  const downloadEntries = Object.values(downloads).flatMap((value) => Array.isArray(value) ? value : value ? [value] : [])
+  const queuedDownloadCount = downloadEntries.filter((download) => download.state === 'encolando').length
+  const activeDownloadCount = downloadEntries.filter((download) => download.state === 'descargando').length
+  const pendingDownloadCount = queuedDownloadCount + activeDownloadCount
+  const transfers = diagnostics?.transfers || []
+  const activeTransfers = transfers.filter((transfer) => !isCompletedTransfer(transfer))
+  const completedTransfers = transfers.filter(isCompletedTransfer)
 
   return (
     <div
       className="min-h-screen bg-[#10121A] text-[#E9EAF0]"
       style={{ fontFamily: FONT_BODY }}
     >
-      <div className="w-full px-5 py-8 sm:px-10 sm:py-10">
-        {/* header / label plate */}
-        <header className="mb-10 flex flex-wrap items-center justify-between gap-5 border-b border-slate-600 pb-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-md border border-[#2C303D] bg-[#1A1D28]">
-              <div className="h-2.5 w-2.5 rounded-sm bg-[#FFFFFF]" />
-            </div>
-            <div>
-              <h1
-                className="text-xl leading-tight tracking-tight text-[#E9EAF0] sm:text-2xl"
-                style={{ fontFamily: FONT_DISPLAY, fontWeight: 600 }}
-              >
-                Spotify <span className="text-[#8D93A6]">&rarr;</span> Soulseek
-              </h1>
-              <p className="mt-1 text-sm text-slate-300">Carga una playlist, encuentra cada pista y descarga los archivos seleccionados.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2 text-xs text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-              <StatusDot ok={backendOnline} />
-              {backendOnline ? 'backend activo' : 'backend sin respuesta'}
-            </div>
-            <span
-              className="rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-sm text-slate-300"
-              title="slskd se ejecuta en modo API y se controla desde esta aplicación"
-            >
-              slskd · API interna
-            </span>
-          </div>
-        </header>
-
-        <nav className="mb-8 flex flex-wrap gap-2 border-b border-[#2C303D] pb-3" aria-label="Secciones">
-          {[
-            ['main', 'Principal'],
-            ['settings', 'Settings'],
-            ['logs', 'Logs'],
-            ['library', 'Biblioteca y previews'],
-          ].map(([tab, label]) => (
-            <button
-              key={tab}
-              onClick={() => navigate(TAB_PATHS[tab])}
-              className={`rounded-md px-3 py-2 text-xs transition-colors ${activeTab === tab
-                ? 'bg-[#FFFFFF] font-medium text-[#161822]'
-                : 'border border-[#2C303D] text-[#8D93A6] hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]'}`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+      <div className="mx-auto w-full max-w-[1440px] px-5 py-8 sm:px-10 sm:py-10">
+        <AppNavbar
+          activeTab={activeTab}
+          navigate={navigate}
+          libraryCount={libraryFiles.length}
+          pendingDownloadCount={pendingDownloadCount}
+          queuedDownloadCount={queuedDownloadCount}
+          activeDownloadCount={activeDownloadCount}
+        />
 
         {activeTab === 'main' && (
           <>
-        {/* input jack */}
-        <section className="mb-8 rounded-xl border border-slate-600 bg-slate-800 p-5 sm:p-6">
-          <div className="mb-4">
-            <h2 className="text-lg font-semibold text-slate-100">1. Cargar playlist de Spotify</h2>
-            <p className="mt-1 text-sm leading-relaxed text-slate-300">Pega aquí el enlace de una playlist pública para importar sus canciones.</p>
-          </div>
-        <form onSubmit={preview} className="flex flex-col gap-3 sm:flex-row">
-          <div className="relative flex-1">
-            <span
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8D93A6]"
-              style={{ fontFamily: FONT_MONO }}
-            >
-              url
-            </span>
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://open.spotify.com/playlist/..."
-              list="url-history"
-              className="w-full rounded-md border border-[#2C303D] bg-[#161822] py-2.5 pl-11 pr-3 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
-              style={{ fontFamily: FONT_MONO }}
+            <SourceInput
+              url={url}
+              onUrlChange={setUrl}
+              loading={loading}
+              onSubmit={preview}
+              onLoadSpotifyPlaylists={loadSpotifyPlaylists}
+              spotifyAuthStatus={spotifyAuth.status}
+              outputFolderName={outputFolderName}
+              onOutputFolderChange={setOutputFolderName}
+              urlHistory={urlHistory}
+              onSelectHistory={selectHistory}
+              onClearHistory={clearHistory}
             />
-            <datalist id="url-history">
-              {urlHistory.map((u, i) => (
-                <option key={i} value={u} />
-              ))}
-            </datalist>
-          </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="whitespace-nowrap rounded-md bg-[#FFFFFF] px-5 py-2.5 text-sm font-medium text-[#161822] transition-colors hover:bg-[#f0b25c] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? 'Cargando playlist…' : 'Cargar playlist'}
-          </button>
-        </form>
-        <div className="mt-4 rounded-md border border-[#2C303D] bg-[#161822] p-3">
-          <button
-            type="button"
-            onClick={loadSpotifyPlaylists}
-            disabled={spotifyAuth.status !== 'authenticated'}
-            className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-3 py-2 text-xs text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            elegir una playlist de Spotify
-          </button>
-          <span className="ml-3 text-xs text-[#8D93A6]">
-            {spotifyAuth.status === 'authenticated' ? 'Abre el selector de playlists' : 'Conecta Spotify desde Settings primero'}
-          </span>
-        </div>
-        <div className="mt-4 rounded-md border border-[#2C303D] bg-[#161822] p-3">
-          <label className="block text-sm font-medium text-slate-200" htmlFor="output-folder-name">
-            Carpeta de salida de esta playlist
-          </label>
-          <p className="mt-1 text-xs leading-relaxed text-[#8D93A6]">
-            Los previews que guardes y las descargas de esta playlist irán aquí. Si lo dejas vacío se usará automáticamente el nombre de la playlist.
-          </p>
-          <input
-            id="output-folder-name"
-            type="text"
-            value={outputFolderName}
-            onChange={(event) => setOutputFolderName(event.target.value)}
-            placeholder="Nombre de la playlist"
-            className="mt-2 w-full rounded-md border border-[#2C303D] bg-[#0D0F16] px-3 py-2 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none focus:border-[#FFFFFF]/60"
-          />
-        </div>
-        {urlHistory.length > 0 && (
-          <div className="mt-5 border-t border-slate-600 pt-5">
-            <label className="block text-sm font-medium text-slate-200" htmlFor="saved-playlists">
-              Historial local de playlists
-            </label>
-            <p className="mt-1 text-sm leading-relaxed text-slate-300">
-              Selecciona una playlist guardada para volver a poner su enlace en la barra. Este historial vive en este navegador y usuario.
-            </p>
-            <div className="mt-3 flex flex-col gap-3 sm:flex-row">
-              <select
-                id="saved-playlists"
-                defaultValue=""
-                onChange={(event) => {
-                  const saved = urlHistory.find((item) => item.url === event.target.value)
-                  if (saved) {
-                    setUrl(saved.url)
-                    setOutputFolderName(saved.name)
-                  }
-                }}
-                className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
-              >
-                <option value="">Elegir una playlist guardada…</option>
-                {urlHistory.map((saved) => (
-                  <option key={saved.url} value={saved.url}>
-                    {saved.name} — {saved.url}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  setUrlHistory([])
-                  saveHistory([])
-                }}
-                className="shrink-0 text-sm text-slate-300 underline decoration-dotted underline-offset-2 hover:text-white"
-              >
-                Borrar historial ({urlHistory.length})
-              </button>
-            </div>
-          </div>
-        )}
-        </section>
-          {playlistPickerOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#10121A]/85 p-4 backdrop-blur-sm">
-              <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-xl border border-[#2C303D] bg-[#161822] shadow-2xl">
-                <div className="flex items-center justify-between border-b border-[#2C303D] p-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-[#E9EAF0]">Tus playlists de Spotify</h2>
-                    <p className="mt-1 text-xs text-[#8D93A6]">Selecciona una playlist para cargarla en Soulseek.</p>
-                  </div>
-                  <button onClick={() => setPlaylistPickerOpen(false)} className="rounded border border-[#2C303D] px-2 py-1 text-xs text-[#8D93A6] hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]">cerrar</button>
-                </div>
-                <div className="border-b border-[#2C303D] p-4">
-                  <input
-                    autoFocus
-                    value={playlistSearch}
-                    onChange={(event) => setPlaylistSearch(event.target.value)}
-                    placeholder="Buscar playlist…"
-                    className="w-full rounded-md border border-[#2C303D] bg-[#0D0F16] px-3 py-2 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none focus:border-[#FFFFFF]/60"
-                  />
-                </div>
-                <div className="min-h-0 overflow-y-auto p-4">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {spotifyPlaylists
-                      .filter((playlist) => playlist.name.toLowerCase().includes(playlistSearch.toLowerCase()))
-                      .map((playlist) => (
-                        <button
-                          key={playlist.id}
-                          type="button"
-                          onClick={() => {
-                            setUrl(playlist.url)
-                            setOutputFolderName(playlist.name)
-                            setPlaylistPickerOpen(false)
-                          }}
-                          className="rounded-lg border border-[#2C303D] bg-[#0D0F16] px-4 py-3 text-left transition-colors hover:border-[#FFFFFF]/50 hover:bg-[#1A1D28]"
-                        >
-                          <p className="truncate text-sm font-medium text-[#E9EAF0]" title={playlist.name}>{playlist.name}</p>
-                        </button>
-                      ))}
-                  </div>
-                  {spotifyPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistSearch.toLowerCase())).length === 0 && (
-                    <p className="py-10 text-center text-sm text-[#8D93A6]">No se encontraron playlists.</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+            <PlaylistPicker
+              open={playlistPickerOpen}
+              playlists={spotifyPlaylists}
+              onClose={() => setPlaylistPickerOpen(false)}
+              onSelect={(playlistUrl) => {
+                setPlaylistPickerOpen(false)
+                loadPlaylist(playlistUrl)
+              }}
+            />
           </>
         )}
 
@@ -1794,15 +1195,24 @@ function App() {
         )}
 
         {activeTab === 'settings' && (
-        <SettingsPanel
-          config={config}
-          onChange={setConfig}
-          onSave={saveConfig}
-          saving={savingConfig}
-          spotifyAuth={spotifyAuth}
-          onStartSpotifyAuth={startSpotifyAuth}
-          open
-        />
+          <SettingsPanel
+            config={config}
+            onChange={setConfig}
+            onSave={saveConfig}
+            saving={savingConfig}
+            spotifyAuth={spotifyAuth}
+            onStartSpotifyAuth={startSpotifyAuth}
+            open
+          />
+        )}
+
+        {activeTab === 'main' && (
+          <RecommendConfig
+            pickMode={pickMode}
+            onPickModeChange={setPickMode}
+            formatPref={formatPref}
+            onFormatPrefChange={setFormatPref}
+          />
         )}
 
         {/* main grid: cards + monitor */}
@@ -1814,214 +1224,98 @@ function App() {
         )}
         <div className={`grid grid-cols-1 gap-8 ${activeTab === 'main' ? 'lg:grid-cols-1' : 'lg:grid-cols-1'}`}>
           <div className={`min-w-0 ${activeTab === 'main' ? '' : 'hidden'}`}>
-            {tracks.length > 0 ? (
-              <>
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm text-[#8D93A6]">
-                    <input
-                      type="checkbox"
-                      checked={selected.size === tracks.length && tracks.length > 0}
-                      onChange={(e) =>
-                        setSelected(
-                          e.target.checked ? new Set(tracks.map((_, i) => i)) : new Set()
-                        )
-                      }
-                      className="h-3.5 w-3.5 cursor-pointer accent-white"
-                    />
-                    {selected.size} de {tracks.length} seleccionada
-                    {selected.size === 1 ? '' : 's'}
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={pickMode}
-                      onChange={(e) => setPickMode(e.target.value)}
-                      title="Criterio de elección"
-                      className="rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1 text-xs text-[#E9EAF0] outline-none"
-                    >
-                      <option value="quality">mejor calidad</option>
-                      <option value="speed">más rápido</option>
-                      <option value="longest">más largo</option>
-                      <option value="balanced">balanceado</option>
-                    </select>
-                    <select
-                      value={formatPref}
-                      onChange={(e) => setFormatPref(e.target.value)}
-                      title="Formato preferido"
-                      className="rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1 text-xs text-[#E9EAF0] outline-none"
-                    >
-                      <option value="any">cualquier formato</option>
-                      <option value="flac">FLAC</option>
-                      <option value="mp3">MP3</option>
-                      <option value="ogg">OGG</option>
-                      <option value="m4a">M4A</option>
-                    </select>
-                    <button
-                      onClick={downloadSelected}
-                      disabled={selected.size === 0}
-                      className="rounded bg-[#FFFFFF] px-2.5 py-1 text-xs font-medium text-[#161822] transition-colors hover:bg-[#f0b25c] disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      descargar seleccionadas
-                    </button>
-                    <button
-                      onClick={autoSearchAll}
-                      className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-2.5 py-1 text-xs text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20"
-                    >
-                      buscar todas
-                    </button>
-                    <a href="/api/download/csv">
-                      <button className="rounded border border-[#2C303D] px-2.5 py-1 text-xs text-[#8D93A6] transition-colors hover:border-[#3A3F4E] hover:text-[#E9EAF0]">
-                        exportar CSV
-                      </button>
-                    </a>
-                    <a href="/api/download/soulseek">
-                      <button className="rounded border border-[#2C303D] px-2.5 py-1 text-xs text-[#8D93A6] transition-colors hover:border-[#3A3F4E] hover:text-[#E9EAF0]">
-                        exportar búsquedas
-                      </button>
-                    </a>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                  {tracks.map((t, i) => renderTrackCard(t, i))}
-                </div>
-              </>
-            ) : (
-              <div className="flex h-48 flex-col items-center justify-center rounded-lg border border-dashed border-[#2C303D] text-center text-sm text-[#565C6E]">
-                <p>Pegá el link de una playlist para ver sus pistas acá.</p>
-              </div>
-            )}
+            <TrackList
+              tracks={tracks}
+              loading={loading}
+              selected={selected}
+              onSelectAll={selectAll}
+              onDownloadSelected={downloadSelected}
+              onAutoSearchAll={autoSearchAll}
+              getTrackSearch={getTrackSearch}
+              isTrackDownloaded={isTrackDownloaded}
+              manualDownloadedTracks={manualDownloadedTracks}
+              trackIdentity={trackIdentity}
+              getTrackDownloads={getTrackDownloads}
+              getSpotifyTrackId={getSpotifyTrackId}
+              onToggleSelect={toggleSelect}
+              onToggleManualDownloaded={toggleManualDownloaded}
+              onUpdateQuery={updateQuery}
+              onCopy={copy}
+              onSearchTrack={searchTrack}
+              pickMode={pickMode}
+              formatPref={formatPref}
+              expandedSearches={expandedSearches}
+              onToggleExpandedSearch={toggleExpandedSearch}
+              collapsedSearches={collapsedSearches}
+              onToggleCollapsedSearch={toggleCollapsedSearch}
+              activePreview={activePreview}
+              onStartPreview={startPreview}
+              onSavePreview={savePreviewToLibrary}
+              onDiscardPreview={discardActivePreview}
+              onCancelPreview={cancelPreview}
+              storedFileStreamUrl={storedFileStreamUrl}
+              storedFileUrl={storedFileUrl}
+              onCancelDownload={cancelTrackDownload}
+              onRefreshSearch={refreshSearch}
+              onCancelSearch={cancelSearch}
+            />
           </div>
 
           {/* monitor column */}
-          <div className={`${activeTab === 'main' ? 'hidden' : activeTab === 'logs' ? 'min-w-0 grid grid-cols-1 gap-4' : 'min-w-0 grid grid-cols-1 gap-4 lg:grid-cols-2'}`}>
-            <div className={`${activeTab === 'library' ? 'flex' : 'hidden'} min-h-[calc(100dvh-15rem)] lg:h-[calc(100dvh-15rem)] min-w-0 flex-col rounded-lg border border-[#2C303D]`}>
-              <div className="flex items-center justify-between border-b border-[#2C303D] px-3 py-2">
-                <div>
-                  <h2 className="text-xs text-[#8D93A6]">Biblioteca local</h2>
-                  <p className="mt-0.5 max-w-[245px] truncate text-[10px] text-[#565C6E]" title={config.downloads_dir}>
-                    {config.downloads_dir || 'sin configurar'}
-                  </p>
-                </div>
-                <button
-                  onClick={refreshLibrary}
-                  className="rounded border border-[#2C303D] px-2 py-1 text-[10px] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
-                >
-                  actualizar
-                </button>
-              </div>
-              <div
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault()
-                  try {
-                    const source = JSON.parse(event.dataTransfer.getData('application/x-soulseek-file'))
-                    if (source?.path) moveLibraryFile(source, '')
-                  } catch {}
-                }}
-                className="min-h-0 flex-1 overflow-y-auto bg-[#0D0F16] p-3 text-[11px] text-[#E9EAF0]"
-              >
-                {!diagnostics ? (
-                  <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>cargando…</p>
-                ) : libraryFiles.length > 0 ? (
-                  renderDownloadTree(buildFolderTree(visibleLibraryFiles), 0, buildFolderTree(libraryFiles))
-                ) : (
-                  <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>la carpeta está vacía</p>
-                )}
-              </div>
-              <Pagination page={currentLibraryPage} total={libraryFiles.length} pageSize={LIBRARY_PAGE_SIZE} onChange={setLibraryPage} />
-              <button
-                type="button"
-                onClick={startNewPlaylist}
-                className="m-3 rounded-md border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-3 py-2 text-xs font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20"
-              >
-                + nuevo playlist
-              </button>
+          <div className={`${activeTab === 'main' ? 'hidden' : activeTab === 'logs' ? 'min-w-0 grid grid-cols-1 gap-4' : 'min-w-0 grid grid-cols-1 gap-4 lg:grid-cols-3'}`}>
+            <div className={`${activeTab === 'library' ? 'flex' : 'hidden'}`}>
+              <LibraryPanel
+                newLibraryFolderName={newLibraryFolderName}
+                onNewFolderNameChange={setNewLibraryFolderName}
+                onCreateFolder={createLibraryFolder}
+                config={config}
+                onRefresh={refreshLibrary}
+                diagnostics={diagnostics}
+                libraryFiles={libraryFiles}
+                libraryFolders={libraryFolders}
+                dragOverFolder={dragOverLibraryFolder}
+                onDragOverFolder={setDragOverLibraryFolder}
+                onMoveFile={moveLibraryFile}
+                storedFileStreamUrl={storedFileStreamUrl}
+                onDeleteFile={deleteItem}
+              />
             </div>
 
-            <div className={`${activeTab === 'logs' ? 'flex' : 'hidden'} min-h-[calc(100vh-15rem)] h-[calc(100vh-15rem)] flex-col rounded-lg border border-[#2C303D]`}>
-              <div className="flex items-center justify-between border-b border-[#2C303D] px-3 py-2">
-                <h2 className="text-xs text-[#8D93A6]">logs</h2>
-                <StatusDot ok={backendOnline} />
-              </div>
-              <pre
-                ref={logRef}
-                className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap bg-[#0D0F16] p-3 text-[11px] leading-relaxed text-[#7FD8CC]"
-                style={{ fontFamily: FONT_MONO }}
-              >
-                {logs.join('\n')}
-              </pre>
+            <div className={`${activeTab === 'logs' ? 'flex' : 'hidden'}`}>
+              <LogsPanel ref={logRef} logs={logs} backendOnline={backendOnline} />
             </div>
 
-            <div className={`${activeTab === 'library' ? 'flex' : 'hidden'} min-h-[calc(100dvh-15rem)] lg:h-[calc(100dvh-15rem)] min-w-0 flex-col rounded-lg border border-[#2C303D]`}>
-              <div className="flex items-center justify-between border-b border-[#2C303D] px-3 py-2">
-                <h2 className="text-xs text-[#8D93A6]">temporales</h2>
-                <button
-                  onClick={cleanupAll}
-                  className="rounded border border-[#FFFFFF]/40 px-2 py-1 text-[10px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
-                >
-                  limpiar todo
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto bg-[#0D0F16] p-3 text-[11px] text-[#E9EAF0]">
-                {!diagnostics ? (
-                  <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>cargando…</p>
-                ) : (
-                  <div className="space-y-3">
-                    {diagnostics.transfers?.length > 0 && (
-                      <div>
-                        <p className="mb-1 text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>slskd</p>
-                        <div className="space-y-1">
-                          {diagnostics.transfers.map((t, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <span className="shrink-0 text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-                                {t.state} · {Math.round(t.percentComplete || 0)}%
-                              </span>
-                              <span className="truncate text-[#E9EAF0]" title={t.filename}>@{t.username}</span>
-                              <button
-                                onClick={() => cancelTransfer(t.username, t.filename)}
-                                className="ml-auto shrink-0 rounded border border-[#FFFFFF]/40 px-1.5 py-0.5 text-[10px] text-[#FFFFFF] hover:bg-[#FFFFFF]/10"
-                              >
-                                cancelar
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {diagnostics.previews?.length > 0 && (
-                      <div>
-                        <p className="mb-1 text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>previews</p>
-                        <div className="space-y-1">
-                          {visiblePreviewFiles.map((f) => (
-                            <LibraryAudioCard
-                              key={f.path}
-                              file={{ ...f, name: f.path.split('/').pop() || f.path }}
-                              streamUrl={storedFileStreamUrl('previews', f.path)}
-                              onDownload={saveTemporaryPreviewToLibrary}
-                              formatSize={formatSize}
-                              dragDir="previews"
-                              onDelete={(path) => {
-                                if (confirm(`¿Borrar ${path}?`)) deleteItem(path, 'previews')
-                              }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    {diagnostics.previews?.length === 0 &&
-                      diagnostics.transfers?.length === 0 && (
-                        <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>sin temporales</p>
-                      )}
-                  </div>
-                )}
-              </div>
-              <Pagination page={currentPreviewPage} total={previewFiles.length} pageSize={PREVIEW_PAGE_SIZE} onChange={setPreviewPage} />
+            <div className={`${activeTab === 'library' ? 'flex' : 'hidden'}`}>
+              <TemporalesPanel
+                diagnostics={diagnostics}
+                activeTransfers={activeTransfers}
+                completedTransfers={completedTransfers}
+                completedTransfersOpen={completedTransfersOpen}
+                onToggleCompletedTransfers={setCompletedTransfersOpen}
+                onCleanupAll={cleanupAll}
+                onCancelTransfer={cancelTransfer}
+                visiblePreviewFiles={visiblePreviewFiles}
+                previewFilesCount={previewFiles.length}
+                currentPreviewPage={currentPreviewPage}
+                onPreviewPageChange={setPreviewPage}
+                storedFileStreamUrl={storedFileStreamUrl}
+                onSaveTemporaryPreview={saveTemporaryPreviewToLibrary}
+                onDeleteFile={deleteItem}
+              />
             </div>
           </div>
         </div>
-        <footer className="mt-8 border-t border-[#2C303D] pt-3 text-center text-[11px] text-[#565C6E]" style={{ fontFamily: FONT_MONO }}>
-          SQLite local · datos de este usuario · no se comparte con otros usuarios
-        </footer>
+        <AppFooter />
+        <ToastContainer
+          position="bottom-right"
+          autoClose={3500}
+          theme="dark"
+          newestOnTop
+          closeOnClick
+          pauseOnFocusLoss
+          draggable
+          limit={4}
+        />
       </div>
     </div>
   )

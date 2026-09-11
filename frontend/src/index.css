@@ -2,43 +2,98 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   Design tokens
+   ========================================================================== */
+
 :root {
   color-scheme: dark;
+
   --ui-bg: #111827;
   --ui-surface: #1f2937;
   --ui-surface-raised: #273449;
+
   --ui-border: #475569;
   --ui-border-strong: #64748b;
+
   --ui-text: #f1f5f9;
   --ui-muted: #cbd5e1;
   --ui-subtle: #94a3b8;
+
   --ui-blue: #3b82f6;
   --ui-blue-hover: #60a5fa;
   --ui-blue-soft: rgba(59, 130, 246, 0.16);
+
+  --ui-focus: rgba(96, 165, 250, 0.35);
+
+  --ui-radius: 0.5rem;
+  --ui-control-height: 44px;
+
+  --ui-transition-fast: 160ms ease;
+}
+
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
+html {
+  color-scheme: dark;
+  background: var(--ui-bg);
 }
 
 body {
   margin: 0;
+
   background: var(--ui-bg);
   color: var(--ui-text);
+
   font-size: 16px;
+  line-height: 1.5;
+
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Shared controls: one readable scale across the whole application. */
+
+/* ==========================================================================
+   Form controls
+   ========================================================================== */
+
 button,
 select,
 input {
+  font: inherit;
   font-size: 0.95rem;
 }
 
-button {
-  min-height: 44px;
-  border-color: var(--ui-border) !important;
-  border-radius: 0.5rem;
+button,
+input,
+select {
+  min-height: var(--ui-control-height);
+
+  border: 1px solid var(--ui-border) !important;
+  border-radius: var(--ui-radius);
+
   background-color: var(--ui-surface) !important;
   color: var(--ui-text) !important;
+}
+
+
+/* ==========================================================================
+   Buttons
+   ========================================================================== */
+
+button {
   padding: 0.65rem 1rem;
-  transition: background-color 160ms ease, border-color 160ms ease, transform 160ms ease;
+
+  cursor: pointer;
+
+  transition:
+    background-color var(--ui-transition-fast),
+    border-color var(--ui-transition-fast),
+    transform var(--ui-transition-fast),
+    box-shadow var(--ui-transition-fast);
 }
 
 button:hover:not(:disabled) {
@@ -55,36 +110,65 @@ button:disabled {
   opacity: 0.55;
 }
 
+
+/* ==========================================================================
+   Inputs
+   ========================================================================== */
+
 input,
 select {
-  min-height: 44px;
-  border-color: var(--ui-border) !important;
-  background-color: var(--ui-surface) !important;
-  color: var(--ui-text) !important;
+  padding: 0.65rem 0.8rem;
+
+  transition:
+    border-color var(--ui-transition-fast),
+    box-shadow var(--ui-transition-fast);
 }
 
 input::placeholder {
   color: var(--ui-subtle);
 }
 
+input:hover:not(:disabled),
+select:hover:not(:disabled) {
+  border-color: var(--ui-border-strong) !important;
+}
+
+
+/* ==========================================================================
+   Focus
+   ========================================================================== */
+
 input:focus,
 select:focus,
 button:focus-visible {
-  outline: 3px solid rgba(96, 165, 250, 0.35);
+  outline: 3px solid var(--ui-focus);
   outline-offset: 2px;
 }
+
+input:focus,
+select:focus {
+  border-color: var(--ui-blue) !important;
+}
+
+
+/* ==========================================================================
+   Labels
+   ========================================================================== */
 
 label {
   line-height: 1.45;
 }
 
-/* Keep utility-sized labels readable without changing compact metadata. */
-button.text-xs,
-button.text-\[11px\],
-button.text-\[10px\],
-select.text-xs {
-  font-size: 0.9rem !important;
-}
+
+/* ==========================================================================
+   Typography helpers
+   ========================================================================== */
+
+/*
+ * Keep small Tailwind labels readable throughout the application.
+ * Metadata and other non-button content remain compact where explicitly
+ * controlled elsewhere.
+ */
 
 .text-xs {
   font-size: 0.875rem !important;
@@ -95,17 +179,24 @@ select.text-xs {
   font-size: 0.8rem !important;
 }
 
-@media (max-width: 640px) {
-  body {
-    font-size: 15px;
-  }
+button.text-xs,
+button.text-\[11px\],
+button.text-\[10px\],
+select.text-xs {
+  font-size: 0.9rem !important;
 }
+
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
 
 @keyframes fadeIn {
   from {
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -114,14 +205,32 @@ select.text-xs {
 
 .fade-in {
   opacity: 0;
-  animation: fadeIn 0.35s ease forwards;
+  animation: fadeIn 350ms ease forwards;
 }
 
-::-webkit-scrollbar {
-  display: none;
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  body {
+    font-size: 15px;
+  }
 }
 
-* {
+
+/* ==========================================================================
+   Scrollbars
+   ========================================================================== */
+
+html,
+body {
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
 }
