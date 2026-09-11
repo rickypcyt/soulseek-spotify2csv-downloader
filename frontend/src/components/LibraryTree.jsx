@@ -59,7 +59,7 @@ export default function LibraryTree({
                 if (source?.path) onMoveFile(source, destinationFolder)
               } catch {}
             }}
-            className={`overflow-hidden rounded-xl border bg-[#161822] shadow-[0_8px_22px_rgba(0,0,0,0.12)] transition-[opacity,border-color,background-color,box-shadow] duration-150 ${dragOverFolder === destinationFolder ? 'border-[#FFFFFF] bg-[#FFFFFF]/20 opacity-50 shadow-[0_0_0_2px_rgba(255,255,255,0.22),0_12px_30px_rgba(0,0,0,0.24)]' : 'border-[#343949]'}`}
+            className={`min-w-0 overflow-hidden rounded-xl border bg-[#161822] shadow-[0_8px_22px_rgba(0,0,0,0.12)] transition-[opacity,border-color,background-color,box-shadow] duration-150 ${dragOverFolder === destinationFolder ? 'border-[#FFFFFF] bg-[#FFFFFF]/20 opacity-50 shadow-[0_0_0_2px_rgba(255,255,255,0.22),0_12px_30px_rgba(0,0,0,0.24)]' : 'border-[#343949]'}`}
           >
             <summary className="group list-none flex cursor-pointer items-center gap-3 px-4 py-3 text-[#E9EAF0] hover:bg-[#1A1D28] [&::-webkit-details-marker]:hidden">
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-[#3A3F4E] bg-[#0D0F16] text-[#8D93A6]" aria-hidden="true">
@@ -107,7 +107,7 @@ export default function LibraryTree({
             }}
           />
         ) : (
-          <div key={file.path} className="rounded-lg border border-[#2C303D] bg-[#161822] p-3">
+          <div key={file.path} className="w-full min-w-0 rounded-lg border border-[#2C303D] bg-[#161822] p-3">
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-[13px] text-[#E9EAF0]" title={file.path}>{file.name}</span>
               <span className="shrink-0 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>{formatSize(file.size)}</span>

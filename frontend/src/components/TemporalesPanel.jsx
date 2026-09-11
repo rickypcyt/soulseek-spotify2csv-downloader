@@ -21,7 +21,7 @@ export default function TemporalesPanel({
   onDeleteFile,
 }) {
   return (
-    <div className="flex min-h-[calc(100dvh-15rem)] lg:col-span-1 lg:h-[calc(100dvh-15rem)] min-w-0 flex-col rounded-lg border border-[#2C303D]">
+    <div className="flex min-h-[calc(100dvh-15rem)] w-full min-w-0 flex-col rounded-lg border border-[#2C303D]">
       <div className="flex items-center justify-between border-b border-[#2C303D] px-3 py-2">
         <h2 className="text-xs text-[#8D93A6]">temporales</h2>
         <button

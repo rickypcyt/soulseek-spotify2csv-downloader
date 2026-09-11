@@ -1,6 +1,7 @@
 import { CheckCircle2, Clock3 } from 'lucide-react'
 import { Chip } from './ui'
 import SearchResults from './SearchResults'
+import SpotifyEmbed from './SpotifyEmbed'
 import { FONT_MONO, RESULTS_PER_TRACK, formatDuration } from '../constants'
 
 export default function TrackCard({
@@ -104,17 +105,8 @@ export default function TrackCard({
         </div>
       )}
 
-      {spotifyTrackId && (
-        <div className="mt-3">
-          <iframe
-            src={`https://open.spotify.com/embed/track/${spotifyTrackId}`}
-            width="100%"
-            height="80"
-            style={{ border: 0, borderRadius: '8px' }}
-            allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-            loading="lazy"
-          />
-        </div>
+      {(spotifyTrackId || t.spotify_preview) && (
+        <SpotifyEmbed trackId={spotifyTrackId} previewUrl={t.spotify_preview} />
       )}
 
       <div className="mt-3 flex items-center gap-2">

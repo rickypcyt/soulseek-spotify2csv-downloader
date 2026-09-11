@@ -25,7 +25,7 @@ export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDo
           </span>
         </button>
 
-        <nav className="order-3 flex w-full items-center gap-1 overflow-x-auto border-t border-[#2C303D] pt-3 sm:order-2 sm:w-auto sm:flex-1 sm:justify-between sm:border-0 sm:pt-0" aria-label="Secciones">
+        <nav className="order-3 flex w-full flex-wrap items-center gap-1 border-t border-[#2C303D] pt-3 sm:order-2 sm:flex-nowrap sm:w-auto sm:flex-1 sm:justify-between sm:border-0 sm:pt-0" aria-label="Secciones">
           <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
@@ -75,7 +75,7 @@ export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDo
               </div>
             </details>
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-1 border-l border-[#2C303D] pl-2">
+          <div className="ml-auto flex shrink-0 items-center gap-1 border-l border-[#2C303D] pl-2 sm:border-l sm:pl-2 max-sm:border-l-0 max-sm:pl-0 max-sm:w-full max-sm:justify-end">
             {[['settings', 'Configuración'], ['logs', 'Logs']].map(([tab, label]) => (
               <button
                 key={tab}

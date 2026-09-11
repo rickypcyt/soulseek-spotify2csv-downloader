@@ -59,7 +59,7 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
         }
         onMoveStart?.(event)
       }}
-      className="cursor-grab rounded-lg border border-[#2C303D] bg-[#161822] p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)] active:cursor-grabbing"
+      className="w-full min-w-0 cursor-grab rounded-lg border border-[#2C303D] bg-[#161822] p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)] active:cursor-grabbing"
     >
       <div className="flex min-w-0 items-center gap-2">
         <button

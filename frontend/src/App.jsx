@@ -1263,7 +1263,7 @@ function App() {
 
           {/* monitor column */}
           <div className={`${activeTab === 'main' ? 'hidden' : activeTab === 'logs' ? 'min-w-0 grid grid-cols-1 gap-4' : 'min-w-0 grid grid-cols-1 gap-4 lg:grid-cols-3'}`}>
-            <div className={`${activeTab === 'library' ? 'flex' : 'hidden'}`}>
+            <div className={`${activeTab === 'library' ? 'flex min-w-0 lg:col-span-2' : 'hidden'}`}>
               <LibraryPanel
                 newLibraryFolderName={newLibraryFolderName}
                 onNewFolderNameChange={setNewLibraryFolderName}
@@ -1281,11 +1281,11 @@ function App() {
               />
             </div>
 
-            <div className={`${activeTab === 'logs' ? 'flex' : 'hidden'}`}>
+            <div className={`${activeTab === 'logs' ? 'flex min-w-0' : 'hidden'}`}>
               <LogsPanel ref={logRef} logs={logs} backendOnline={backendOnline} />
             </div>
 
-            <div className={`${activeTab === 'library' ? 'flex' : 'hidden'}`}>
+            <div className={`${activeTab === 'library' ? 'flex min-w-0 lg:col-span-1' : 'hidden'}`}>
               <TemporalesPanel
                 diagnostics={diagnostics}
                 activeTransfers={activeTransfers}

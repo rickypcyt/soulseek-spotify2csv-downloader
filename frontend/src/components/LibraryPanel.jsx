@@ -17,7 +17,7 @@ export default function LibraryPanel({
   onDeleteFile,
 }) {
   return (
-    <div className="flex min-h-[calc(100dvh-15rem)] lg:col-span-2 lg:h-[calc(100dvh-15rem)] min-w-0 flex-col gap-3">
+    <div className="flex min-h-[calc(100dvh-15rem)] w-full min-w-0 flex-col gap-3">
       <div className="flex shrink-0 flex-col gap-2 rounded-lg border border-[#2C303D] bg-[#161822] p-3 sm:flex-row sm:items-center">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-[#E9EAF0]">Nueva carpeta de playlist</p>
