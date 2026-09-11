@@ -12,11 +12,163 @@ La aplicación se ejecuta completamente en tu equipo:
 
 > Estado actual: aplicación local para Windows con configuración preparada para usar `keyring` en Windows, macOS y Linux. El proveedor Soulseek utilizado es `slskd`.
 
+## Empezando desde cero
+
+Si nunca has instalado nada de esto en tu equipo, sigue estos pasos en orden. Al terminar tendrás la aplicación funcionando en tu navegador.
+
+### 1. Instalar Python 3.13
+
+Descárgalo desde la página oficial:
+
+```text
+https://www.python.org/downloads/
+```
+
+Durante la instalación en Windows, marca la casilla **"Add Python to PATH"** antes de pulsar Install. Sin esa casilla los comandos `py` y `python` no funcionarán.
+
+Para comprobar que quedó bien, abre una terminal (ver el paso 4) y ejecuta:
+
+```powershell
+py -3.13 --version
+```
+
+Debe responder algo como `Python 3.13.x`. Si responde con un error, vuelve a instalar marcando la casilla de PATH.
+
+### 2. Instalar Node.js LTS
+
+Descárgalo desde la página oficial:
+
+```text
+https://nodejs.org/
+```
+
+Elige la versión LTS (verde). La instalación incluye `npm`, que la aplicación necesita.
+
+Compruébalo con:
+
+```powershell
+node --version
+npm --version
+```
+
+Ambos deben responder con un número de versión.
+
+### 3. Conseguir el código del proyecto
+
+Si usas Git:
+
+```powershell
+git clone <URL_DEL_REPOSITORIO> soulseek
+cd soulseek
+```
+
+Si no tienes Git, descarga el proyecto como ZIP desde la página del repositorio (botón **Code → Download ZIP**), descomprímelo en una carpeta y abre esa carpeta.
+
+El resto de esta guía asume que estás dentro de la carpeta raíz del proyecto (la que contiene `run.ps1`).
+
+### 4. Abrir PowerShell en la carpeta del proyecto
+
+La forma más sencilla en Windows 11:
+
+1. Abre la carpeta del proyecto en el Explorador de archivos.
+2. Botón derecho sobre el fondo (sin seleccionar ningún archivo).
+3. Elige **Open in Terminal** o **Abrir en Terminal**.
+
+Si no aparece esa opción, abre PowerShell desde el menú Inicio y luego navega a la carpeta:
+
+```powershell
+cd "RUTA\A\la\carpeta\soulseek"
+```
+
+Cambia `RUTA\A\la\carpeta\soulseek` por la ruta real donde descomprimiste o clonaste el proyecto.
+
+### 5. Crear una aplicación en Spotify Developer
+
+Esta aplicación necesita credenciales de Spotify para leer tus playlists. Son gratuitas pero tienes que crearlas una vez.
+
+1. Entra en https://developer.spotify.com/dashboard y inicia sesión con tu cuenta de Spotify.
+2. Pulsa **Create app**.
+3. Rellena el nombre y la descripción con lo que quieras (por ejemplo, "Soulseek local").
+4. En **Redirect URI** pega exactamente:
+
+   ```text
+   http://127.0.0.1:8080/callback
+   ```
+
+5. Acepta los términos y crea la aplicación.
+6. En la página de la app, abre **Settings** y copia el **Client ID** y el **Client Secret**.
+7. Guárdalos para el paso 7.
+
+Más detalles en la guía oficial:
+
+```text
+https://developer.spotify.com/documentation/web-api/concepts/apps
+```
+
+### 6. Tener una cuenta de Soulseek
+
+Si no tienes cuenta, crea una en:
+
+```text
+https://www.slsknet.org/
+```
+
+La aplicación usa estas credenciales para conectarse a la red Soulseek mediante `slskd`.
+
+### 7. Arrancar la aplicación
+
+En la terminal que abriste en el paso 4, ejecuta:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\run.ps1
+```
+
+La primera vez `run.ps1` comprueba si falta algo y, si hace falta, ejecuta `setup.ps1` automáticamente para:
+
+- Instalar las dependencias de Python.
+- Instalar las dependencias del frontend (`frontend/node_modules`).
+- Descargar la versión fijada de `slskd.exe`.
+- Preparar la configuración local de `slskd`.
+
+En arranques posteriores no reinstala nada si ya está todo listo.
+
+Para una reinstalación forzada:
+
+```powershell
+.\setup.ps1 -Force
+```
+
+Cuando termine, abre el navegador en:
+
+```text
+http://127.0.0.1:5000/
+```
+
+Para detener la aplicación, vuelve a la terminal y pulsa `Ctrl+C`.
+
+### 8. Configurar Spotify y Soulseek en la interfaz
+
+La primera vez que abras la aplicación ve a la página **Settings** (enlace en la parte superior) y completa:
+
+- **Spotify Client ID** y **Spotify Client Secret** que copiaste en el paso 5.
+- **Redirect URI**, que debe ser:
+
+  ```text
+  http://127.0.0.1:8080/callback
+  ```
+
+- **Usuario** y **contraseña** de Soulseek (paso 6).
+- **Carpeta de descargas** donde quieres que se guarden las canciones.
+
+Después pulsa **conectar Spotify**. Se abrirá el navegador para autorizar la aplicación y Spotify volverá a la Redirect URI anterior.
+
+Ya está todo listo. Ve a la página **Principal** y pega una URL de playlist de Spotify para empezar.
+
 ## Índice
 
+- [Empezando desde cero](#empezando-desde-cero)
 - [Qué puedes hacer](#qué-puedes-hacer)
-- [Requisitos](#requisitos)
-- [Instalación y primer arranque](#instalación-y-primer-arranque)
 - [Configuración desde la interfaz](#configuración-desde-la-interfaz)
 - [Autenticación de Spotify](#autenticación-de-spotify)
 - [Uso diario](#uso-diario)
@@ -51,58 +203,6 @@ La aplicación se ejecuta completamente en tu equipo:
 - Descargar o borrar archivos de la Biblioteca y de `temp`.
 - Consultar logs, transferencias y estado de los servicios.
 - Mantener resultados de búsqueda, preferencias y canciones descargadas entre sesiones.
-
-## Requisitos
-
-Necesitas:
-
-- Windows 10 u 11 para el flujo actual de instalación automática.
-- PowerShell 5 o superior.
-- Python 3.13.
-- Node.js LTS con npm.
-- Una cuenta de Spotify Developer para obtener Client ID y Client Secret.
-- Una cuenta de Soulseek.
-
-La aplicación escucha localmente y no requiere publicar puertos en Internet.
-
-## Instalación y primer arranque
-
-Abre PowerShell en la raíz del proyecto:
-
-```powershell
-cd C:\coding\soulseek
-```
-
-Ejecuta únicamente:
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\run.ps1
-```
-
-`run.ps1` comprueba automáticamente si faltan:
-
-- Dependencias de Python.
-- Dependencias del frontend.
-- `frontend/node_modules`.
-- `slskd.exe`.
-- La configuración local de `slskd`.
-
-Si falta algo, ejecuta `setup.ps1` automáticamente. El setup instala las dependencias, descarga la versión fijada de `slskd` y prepara su ruta local. En arranques posteriores no reinstala todo si la instalación ya está lista.
-
-Para una reinstalación forzada:
-
-```powershell
-.\setup.ps1 -Force
-```
-
-La interfaz principal queda disponible en:
-
-```text
-http://127.0.0.1:5000/
-```
-
-Para detenerla, vuelve a la terminal y pulsa `Ctrl+C`.
 
 ## Configuración desde la interfaz
 
