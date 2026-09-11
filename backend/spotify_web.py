@@ -677,11 +677,19 @@ def api_spotify_playlists():
         if not token:
             return jsonify({"error": "Conecta Spotify desde Settings primero."}), 401
         spotify = spotipy.Spotify(auth_manager=auth)
+        current_user = spotify.current_user()
+        owner_id = current_user.get("id")
         playlists = []
-        response = spotify.current_user_playlists(limit=50)
+        response = spotify.current_user_playlists(
+            limit=50,
+            fields="items(id,name,external_urls,owner(id,display_name),public),next",
+        )
         while response and len(playlists) < 500:
             for playlist in response.get("items", []):
                 if not playlist or not playlist.get("id"):
+                    continue
+                playlist_owner = (playlist.get("owner") or {}).get("id")
+                if owner_id and playlist_owner != owner_id:
                     continue
                 playlists.append({
                     "id": playlist["id"],
@@ -690,11 +698,11 @@ def api_spotify_playlists():
                         "spotify",
                         f"https://open.spotify.com/playlist/{playlist['id']}",
                     ),
-                    "tracks": playlist.get("tracks", {}).get("total", 0),
                 })
             if not response.get("next"):
                 break
             response = spotify.next(response)
+        playlists.sort(key=lambda playlist: playlist["name"].casefold())
         return jsonify({"playlists": playlists})
     except Exception as exc:
         add_log(f"[spotify] Error al cargar playlists: {exc}")

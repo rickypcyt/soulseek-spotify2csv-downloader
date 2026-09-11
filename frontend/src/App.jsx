@@ -23,16 +23,29 @@ const PREVIEW_PAGE_SIZE = 12
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap" rel="stylesheet">
 */
 
+function normalizeHistory(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .map((entry, index) => {
+      const item = typeof entry === 'string' ? { url: entry } : entry
+      if (!item?.url) return null
+      return {
+        url: item.url,
+        name: item.name || getHistoryLabel(item.url, index),
+      }
+    })
+    .filter(Boolean)
+}
+
 function loadHistory() {
   try {
-    return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
+    return normalizeHistory(JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'))
   } catch {
     return []
   }
 }
 
 function saveHistory(history) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 20)))
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(normalizeHistory(history).slice(0, 20)))
 }
 
 function loadSearchPreferences() {
@@ -452,6 +465,8 @@ function App() {
   const [config, setConfig] = useState({})
   const [spotifyAuth, setSpotifyAuth] = useState({ status: 'not_configured' })
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
+  const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
+  const [playlistSearch, setPlaylistSearch] = useState('')
   const [savingConfig, setSavingConfig] = useState(false)
   const [diagnostics, setDiagnostics] = useState(null)
   const [libraryPage, setLibraryPage] = useState(1)
@@ -510,6 +525,8 @@ function App() {
     try {
       const data = await requestJson('/api/spotify/playlists')
       setSpotifyPlaylists(data.playlists || [])
+      setPlaylistSearch('')
+      setPlaylistPickerOpen(true)
     } catch (err) {
       alert('No se pudieron cargar tus playlists: ' + err.message)
     }
@@ -768,7 +785,11 @@ function App() {
       setTracks(loaded)
       setSelected(new Set(loaded.map((_, i) => i)))
       if (url) {
-        const next = [url, ...urlHistory.filter((u) => u !== url)]
+        const historyItem = {
+          url,
+          name: data.playlist_name || getHistoryLabel(url, 0),
+        }
+        const next = [historyItem, ...urlHistory.filter((item) => item.url !== url)]
         setUrlHistory(next)
         saveHistory(next)
       }
@@ -1561,33 +1582,17 @@ function App() {
           </button>
         </form>
         <div className="mt-4 rounded-md border border-[#2C303D] bg-[#161822] p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={loadSpotifyPlaylists}
-              disabled={spotifyAuth.status !== 'authenticated'}
-              className="shrink-0 rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-3 py-2 text-xs text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              cargar mis playlists
-            </button>
-            <select
-              value=""
-              onChange={(event) => {
-                const playlist = spotifyPlaylists.find((item) => item.id === event.target.value)
-                if (playlist) setUrl(playlist.url)
-              }}
-              className="min-w-0 flex-1 rounded-md border border-[#2C303D] bg-[#0D0F16] px-3 py-2 text-sm text-[#E9EAF0]"
-            >
-              <option value="">
-                {spotifyAuth.status === 'authenticated' ? 'Seleccionar una playlist de Spotify…' : 'Conecta Spotify desde Settings para ver tus playlists'}
-              </option>
-              {spotifyPlaylists.map((playlist) => (
-                <option key={playlist.id} value={playlist.id}>
-                  {playlist.name} · {playlist.tracks} pistas
-                </option>
-              ))}
-            </select>
-          </div>
+          <button
+            type="button"
+            onClick={loadSpotifyPlaylists}
+            disabled={spotifyAuth.status !== 'authenticated'}
+            className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-3 py-2 text-xs text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            elegir una playlist de Spotify
+          </button>
+          <span className="ml-3 text-xs text-[#8D93A6]">
+            {spotifyAuth.status === 'authenticated' ? 'Abre el selector de playlists' : 'Conecta Spotify desde Settings primero'}
+          </span>
         </div>
         <div className="mt-4 rounded-md border border-[#2C303D] bg-[#161822] p-3">
           <label className="block text-sm font-medium text-slate-200" htmlFor="output-folder-name">
@@ -1618,14 +1623,18 @@ function App() {
                 id="saved-playlists"
                 defaultValue=""
                 onChange={(event) => {
-                  if (event.target.value) setUrl(event.target.value)
+                  const saved = urlHistory.find((item) => item.url === event.target.value)
+                  if (saved) {
+                    setUrl(saved.url)
+                    setOutputFolderName(saved.name)
+                  }
                 }}
                 className="min-w-0 flex-1 rounded-md border border-slate-600 bg-slate-900 px-3 py-2 text-sm text-slate-100"
               >
                 <option value="">Elegir una playlist guardada…</option>
-                {urlHistory.map((savedUrl, index) => (
-                  <option key={savedUrl} value={savedUrl}>
-                    {getHistoryLabel(savedUrl, index)} — {savedUrl}
+                {urlHistory.map((saved) => (
+                  <option key={saved.url} value={saved.url}>
+                    {saved.name} — {saved.url}
                   </option>
                 ))}
               </select>
@@ -1643,6 +1652,51 @@ function App() {
           </div>
         )}
         </section>
+          {playlistPickerOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#10121A]/85 p-4 backdrop-blur-sm">
+              <div className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-xl border border-[#2C303D] bg-[#161822] shadow-2xl">
+                <div className="flex items-center justify-between border-b border-[#2C303D] p-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-[#E9EAF0]">Tus playlists de Spotify</h2>
+                    <p className="mt-1 text-xs text-[#8D93A6]">Selecciona una playlist para cargarla en Soulseek.</p>
+                  </div>
+                  <button onClick={() => setPlaylistPickerOpen(false)} className="rounded border border-[#2C303D] px-2 py-1 text-xs text-[#8D93A6] hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]">cerrar</button>
+                </div>
+                <div className="border-b border-[#2C303D] p-4">
+                  <input
+                    autoFocus
+                    value={playlistSearch}
+                    onChange={(event) => setPlaylistSearch(event.target.value)}
+                    placeholder="Buscar playlist…"
+                    className="w-full rounded-md border border-[#2C303D] bg-[#0D0F16] px-3 py-2 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none focus:border-[#FFFFFF]/60"
+                  />
+                </div>
+                <div className="min-h-0 overflow-y-auto p-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {spotifyPlaylists
+                      .filter((playlist) => playlist.name.toLowerCase().includes(playlistSearch.toLowerCase()))
+                      .map((playlist) => (
+                        <button
+                          key={playlist.id}
+                          type="button"
+                          onClick={() => {
+                            setUrl(playlist.url)
+                            setOutputFolderName(playlist.name)
+                            setPlaylistPickerOpen(false)
+                          }}
+                          className="rounded-lg border border-[#2C303D] bg-[#0D0F16] px-4 py-3 text-left transition-colors hover:border-[#FFFFFF]/50 hover:bg-[#1A1D28]"
+                        >
+                          <p className="truncate text-sm font-medium text-[#E9EAF0]" title={playlist.name}>{playlist.name}</p>
+                        </button>
+                      ))}
+                  </div>
+                  {spotifyPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistSearch.toLowerCase())).length === 0 && (
+                    <p className="py-10 text-center text-sm text-[#8D93A6]">No se encontraron playlists.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           </>
         )}
 
