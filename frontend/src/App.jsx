@@ -58,6 +58,15 @@ function App() {
   const [pickMode, setPickMode] = useState(() => searchPreferences.pickMode)
   const [formatPref, setFormatPref] = useState(() => searchPreferences.formatPref)
   const logRef = useRef(null)
+  const downloadSelectedTimers = useRef([])
+
+  // Limpiar timeouts pendientes de descarga masiva al desmontar.
+  useEffect(() => {
+    return () => {
+      downloadSelectedTimers.current.forEach(clearTimeout)
+      downloadSelectedTimers.current = []
+    }
+  }, [])
 
   // ---- composed hooks ----
   const { navigate, activeTab } = useTabNavigation()
@@ -214,11 +223,16 @@ function App() {
 
   const downloadSelected = () => {
     const list = tracks.map((_, i) => i).filter((i) => selected.has(i))
+    downloadSelectedTimers.current.forEach(clearTimeout)
+    downloadSelectedTimers.current = []
     list.forEach((i, n) => {
       const s = getTrackSearch(i)
       const results = rankResults(s?.raw?.results || [], s?.query, pickMode, formatPref)
       const best = pickBest(results, pickMode, formatPref)
-      if (best) setTimeout(() => enqueueDownload(i, best), n * 400)
+      if (best) {
+        const id = setTimeout(() => enqueueDownload(i, best), n * 400)
+        downloadSelectedTimers.current.push(id)
+      }
     })
   }
 

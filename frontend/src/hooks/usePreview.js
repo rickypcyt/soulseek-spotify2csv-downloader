@@ -92,9 +92,6 @@ export function usePreview({ tracks, outputFolderName, fetchDiagnostics }) {
         body: JSON.stringify({
           username: res.username,
           filename: res.filename,
-          trackKey: getSpotifyTrackId(tracks[trackIndex]?.spotify_url),
-          trackName: tracks[trackIndex]?.track_name,
-          artists: tracks[trackIndex]?.artists,
           size: res.size,
         }),
       })

@@ -1,10 +1,18 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import { requestJson } from '../api/client'
-import { usePolling } from './usePolling'
+
+// Poll rápido solo mientras autentica; casi nulo en estados estables.
+const FAST_INTERVAL_MS = 3000
+const SLOW_INTERVAL_MS = 60000
 
 export function useSpotifyAuth() {
   const [spotifyAuth, setSpotifyAuth] = useState({ status: 'not_configured' })
+  const spotifyAuthRef = useRef(spotifyAuth)
+
+  useEffect(() => {
+    spotifyAuthRef.current = spotifyAuth
+  }, [spotifyAuth])
 
   const fetchSpotifyAuth = useCallback(async () => {
     try {
@@ -21,7 +29,25 @@ export function useSpotifyAuth() {
     }
   }, [])
 
-  usePolling(fetchSpotifyAuth, 3000)
+  // Intervalo dinámico: rápido mientras autentica, lento en estados estables.
+  useEffect(() => {
+    let cancelled = false
+    let timer = null
+
+    const tick = async () => {
+      await fetchSpotifyAuth()
+      if (cancelled) return
+      const status = spotifyAuthRef.current.status
+      const nextDelay = status === 'authenticating' ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS
+      timer = setTimeout(tick, nextDelay)
+    }
+
+    timer = setTimeout(tick, 0)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [fetchSpotifyAuth])
 
   return { spotifyAuth, startSpotifyAuth }
 }

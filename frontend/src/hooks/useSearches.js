@@ -90,9 +90,16 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
   }, [url, searches])
 
   // Keep one stable polling loop for all Soulseek searches.
+  // Auto-reschedule: rápido cuando hay pendientes, lento en reposo.
   useEffect(() => {
+    let cancelled = false
+    let timer = null
+
     const poll = async () => {
-      if (searchPollInFlight.current || searchesRef.current.length === 0) return
+      if (searchPollInFlight.current || searchesRef.current.length === 0) {
+        timer = setTimeout(poll, SEARCH_POLL_INTERVAL_MS)
+        return
+      }
       searchPollInFlight.current = true
       const current = searchesRef.current
       const pendingSearches = current.filter(
@@ -100,6 +107,8 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
       )
       if (pendingSearches.length === 0) {
         searchPollInFlight.current = false
+        // Sin pendientes: re-check ligero para detectar nuevas búsquedas.
+        timer = setTimeout(poll, SEARCH_POLL_INTERVAL_MS * 4)
         return
       }
       const updates = {}
@@ -126,10 +135,14 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
       } finally {
         searchPollInFlight.current = false
       }
+      timer = setTimeout(poll, SEARCH_POLL_INTERVAL_MS)
     }
 
-    const iv = setInterval(poll, SEARCH_POLL_INTERVAL_MS)
-    return () => clearInterval(iv)
+    timer = setTimeout(poll, SEARCH_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
   }, [])
 
   // Clear all search timers on unmount.
@@ -186,6 +199,10 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
 
   const cancelSearch = useCallback((searchId) => {
     setSearches((prev) => prev.filter((item) => item.searchId !== searchId))
+    // Avisar al backend para que slskd deje de buscar y libere el slot activo.
+    if (searchId) {
+      request(`/api/search_soulseek/${searchId}`, { method: 'DELETE' }).catch(() => {})
+    }
     toast.info('Búsqueda cancelada')
   }, [])
 
