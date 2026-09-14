@@ -16,6 +16,8 @@ web_logs.json
 web_config.json
 web_library_index.json
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 *.log
