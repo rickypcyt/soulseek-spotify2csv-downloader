@@ -21,19 +21,13 @@ export default function SourceInput({
       </div>
       <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
-          <span
-            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#8D93A6]"
-            style={{ fontFamily: FONT_MONO }}
-          >
-            fuente
-          </span>
           <input
             type="text"
             value={url}
             onChange={(e) => onUrlChange(e.target.value)}
             placeholder="Pega una URL de Spotify o escribe artista - canción"
             list="url-history"
-            className="w-full rounded-md border border-[#2C303D] bg-[#161822] py-2.5 pl-11 pr-3 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
+            className="w-full rounded-md border border-[#2C303D] bg-[#161822] py-2.5 px-3 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
             style={{ fontFamily: FONT_MONO }}
           />
           <datalist id="url-history">

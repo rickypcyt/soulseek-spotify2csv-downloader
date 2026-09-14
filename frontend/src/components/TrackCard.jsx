@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock3 } from 'lucide-react'
+import { CheckCircle2, Clock3, EyeOff } from 'lucide-react'
 import { Chip } from './ui'
 import SearchResults from './SearchResults'
 import SpotifyEmbed from './SpotifyEmbed'
@@ -12,6 +12,8 @@ export default function TrackCard({
   actualDownloaded,
   manuallyDownloaded,
   onToggleManualDownloaded,
+  ignored,
+  onToggleIgnored,
   trackDownloads,
   spotifyTrackId,
   search,
@@ -91,6 +93,19 @@ export default function TrackCard({
           <CheckCircle2 size={13} strokeWidth={2} />
           <span className="hidden sm:inline">{downloaded ? 'descargada' : 'marcar descargada'}</span>
         </button>
+        <button
+          type="button"
+          onClick={() => onToggleIgnored(t, i)}
+          aria-pressed={ignored}
+          aria-label={ignored ? 'Quitar de ignoradas' : 'Ignorar pista'}
+          title={ignored ? 'Restaurar pista' : 'Ignorar pista'}
+          className={`flex h-7 min-h-7 shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] transition-colors ${ignored
+            ? 'border-[#8D93A6]/60 text-[#8D93A6] bg-[#8D93A6]/10'
+            : 'border-[#2C303D] text-[#8D93A6] hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]'}`}
+        >
+          <EyeOff size={13} strokeWidth={2} />
+          <span className="hidden sm:inline">{ignored ? 'restaurar' : 'ignorar'}</span>
+        </button>
       </div>
 
       {trackDownloads.length > 0 && (
@@ -107,7 +122,7 @@ export default function TrackCard({
         </div>
       )}
 
-      {(spotifyTrackId || t.spotify_preview) && (
+      {!downloaded && (spotifyTrackId || t.spotify_preview) && (
         <SpotifyEmbed
           trackId={spotifyTrackId}
           previewUrl={t.spotify_preview}

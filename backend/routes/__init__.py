@@ -19,6 +19,7 @@ from backend.routes import (
     preview,
     search,
     spotify_routes,
+    storage,
 )
 from backend.runtime import RuntimeState
 
@@ -34,3 +35,4 @@ def register_blueprints(app: Flask, state: RuntimeState) -> None:
     app.register_blueprint(spotify_routes.create_blueprint(state))
     app.register_blueprint(files.create_blueprint(state))
     app.register_blueprint(diagnostics.create_blueprint(state))
+    app.register_blueprint(storage.create_blueprint(state))

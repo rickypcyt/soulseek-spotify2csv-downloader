@@ -12,6 +12,7 @@ import os
 import secrets
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
 MAX_SEARCH_QUERY_LENGTH = 200
 MAX_ACTIVE_SEARCHES = 50
 MAX_SEARCH_LIFETIME_SECONDS = 120
+SEARCH_QUEUE_TIMEOUT_SECONDS = 120
 _TERMINAL_SEARCH_STATES = {"completed", "complete", "finished", "failed", "error", "cancelled", "canceled"}
 _COMPLETED_TRANSFER_STATES = {"completed", "complete", "succeeded", "finished"}
 
@@ -43,6 +45,8 @@ class SlskdClient:
         # Active search tracking (replaces ACTIVE_SEARCH_IDS / ACTIVE_SEARCH_STARTED).
         self.active_search_ids: set[str] = set()
         self.active_search_started: dict[str, float] = {}
+        # Cola de búsquedas: las peticiones esperan a que se libere un slot.
+        self._search_slot = threading.Condition()
         # Pending download tracking (replaces PENDING_DOWNLOADS / *_FOLDERS / *_METADATA).
         self.pending_folders: dict[tuple[str, str], str | None] = {}
         self.pending_metadata: dict[tuple[str, str], dict[str, str]] = {}
@@ -153,6 +157,9 @@ class SlskdClient:
         for search_id in expired:
             self.active_search_started.pop(search_id, None)
             self.active_search_ids.discard(search_id)
+        if expired:
+            with self._search_slot:
+                self._search_slot.notify_all()
 
     @staticmethod
     def normalize_search(data: dict[str, Any]) -> dict[str, Any]:
@@ -181,13 +188,24 @@ class SlskdClient:
         return data
 
     def create_search(self, query: str) -> tuple[dict[str, Any], int]:
-        """POST a new search. Returns (json_body, status_code)."""
+        """POST a new search. Returns (json_body, status_code).
+
+        Si hay demasiadas búsquedas activas, espera a que se libere un slot
+        en vez de devolver un error 429.
+        """
         self.state.logs.add(f"[slskd] POST {self.url}/api/v0/searches")
         self.state.logs.add(f"[slskd] searchText='{query}'")
         if not self.ensure_available():
             message = self.unavailable_message()
             self.state.logs.add(f"[slskd] {message}")
             return {"error": message, "status": "unavailable"}, 503
+        # Cola de búsquedas: esperar a que haya un slot libre.
+        self._prune_active_searches()
+        with self._search_slot:
+            while len(self.active_search_ids) >= MAX_ACTIVE_SEARCHES:
+                if not self._search_slot.wait(timeout=SEARCH_QUEUE_TIMEOUT_SECONDS):
+                    self.state.logs.add("[slskd] Tiempo de espera agotado en la cola de búsquedas")
+                    return {"error": "Tiempo de espera agotado esperando un slot de búsqueda"}, 503
         search_id = str(uuid.uuid4())
         try:
             response = requests.post(
@@ -220,6 +238,8 @@ class SlskdClient:
     def cancel_search(self, search_id: str) -> tuple[dict[str, Any], int]:
         self.active_search_ids.discard(search_id)
         self.active_search_started.pop(search_id, None)
+        with self._search_slot:
+            self._search_slot.notify()
         try:
             response = requests.delete(
                 f"{self.url}/api/v0/searches/{search_id}",
@@ -259,6 +279,8 @@ class SlskdClient:
             if status in _TERMINAL_SEARCH_STATES:
                 self.active_search_ids.discard(search_id)
                 self.active_search_started.pop(search_id, None)
+                with self._search_slot:
+                    self._search_slot.notify()
             self.state.logs.add(f"[slskd] GET data (searchId={search_id}): resultados={data['resultsCount']}")
             return data, 200
         except Exception as e:

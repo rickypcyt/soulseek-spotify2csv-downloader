@@ -1,9 +1,5 @@
+import { requestJson, request } from '../api/client'
 import { getSpotifyTrackId } from './spotify'
-
-const HISTORY_KEY = 'spotifyUrlHistory'
-const OUTPUT_FOLDER_PREFERENCES_KEY = 'soulseekOutputFolderPreferences'
-const SEARCH_PREFERENCES_KEY = 'soulseekSearchPreferences'
-const LAST_PLAYLIST_KEY = 'lastPlaylist'
 
 const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
@@ -35,22 +31,34 @@ export function normalizeHistory(entries) {
     .filter(Boolean)
 }
 
-export function loadHistory() {
+export async function loadHistory() {
   try {
-    return normalizeHistory(JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'))
+    return normalizeHistory(await requestJson('/api/storage/history'))
   } catch {
     return []
   }
 }
 
-export function saveHistory(history) {
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(normalizeHistory(history).slice(0, 20)))
+export async function saveHistory(history) {
+  try {
+    await request('/api/storage/history', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: normalizeHistory(history).slice(0, 20) }),
+    })
+  } catch {}
+}
+
+export async function clearHistory() {
+  try {
+    await request('/api/storage/history', { method: 'DELETE' })
+  } catch {}
 }
 
 // ---- search preferences ----------------------------------------------------
-export function loadSearchPreferences() {
+export async function loadSearchPreferences() {
   try {
-    const saved = JSON.parse(localStorage.getItem(SEARCH_PREFERENCES_KEY) || 'null')
+    const saved = await requestJson('/api/storage/search-preferences')
     return {
       pickMode: PICK_MODES.includes(saved?.pickMode) ? saved.pickMode : 'quality',
       formatPref: FORMAT_PREFS.includes(saved?.formatPref) ? saved.formatPref : 'any',
@@ -60,59 +68,64 @@ export function loadSearchPreferences() {
   }
 }
 
-export function saveSearchPreferences(pickMode, formatPref) {
+export async function saveSearchPreferences(pickMode, formatPref) {
   try {
-    localStorage.setItem(SEARCH_PREFERENCES_KEY, JSON.stringify({ pickMode, formatPref }))
+    await request('/api/storage/search-preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pickMode, formatPref }),
+    })
   } catch {}
 }
 
 // ---- last playlist ---------------------------------------------------------
-export function loadLastPlaylist() {
+export async function loadLastPlaylist() {
   try {
-    return JSON.parse(localStorage.getItem(LAST_PLAYLIST_KEY) || 'null') || {}
+    return await requestJson('/api/storage/playlist')
   } catch {
     return {}
   }
 }
 
-export function saveLastPlaylist(playlist) {
-  localStorage.setItem(LAST_PLAYLIST_KEY, JSON.stringify(playlist))
+export async function saveLastPlaylist(playlist) {
+  try {
+    await request('/api/storage/playlist', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(playlist),
+    })
+  } catch {}
 }
 
 // ---- output folder preferences ---------------------------------------------
-export function loadOutputFolderPreferences() {
+export async function getOutputFolderPreference(url) {
+  if (!url) return undefined
   try {
-    const preferences = JSON.parse(localStorage.getItem(OUTPUT_FOLDER_PREFERENCES_KEY) || '{}')
-    return preferences && typeof preferences === 'object' ? preferences : {}
+    const data = await requestJson(`/api/storage/output-folder?playlist_url=${encodeURIComponent(url)}`)
+    return data.folderName ?? undefined
   } catch {
-    return {}
+    return undefined
   }
 }
 
-export function getOutputFolderPreference(url) {
-  if (!url) return undefined
-  const preferences = loadOutputFolderPreferences()
-  return Object.prototype.hasOwnProperty.call(preferences, url) ? preferences[url] : undefined
-}
-
-export function setOutputFolderPreference(url, folderName) {
+export async function setOutputFolderPreference(url, folderName) {
   if (!url) return
-  const preferences = loadOutputFolderPreferences()
-  preferences[url] = folderName
-  localStorage.setItem(OUTPUT_FOLDER_PREFERENCES_KEY, JSON.stringify(preferences))
+  try {
+    await request('/api/storage/output-folder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_url: url, folder_name: folderName || '' }),
+    })
+  } catch {}
 }
 
 // ---- search cache ----------------------------------------------------------
-function searchCacheKey(url) {
-  return `soulseekSearchCache:${encodeURIComponent(url || '')}`
-}
-
-export function loadSearchCache(url, tracks) {
+export async function loadSearchCache(url, tracks) {
   if (!url) return []
   try {
-    const cached = JSON.parse(localStorage.getItem(searchCacheKey(url)) || 'null')
-    if (!cached || Date.now() - cached.savedAt > SEARCH_CACHE_TTL_MS) return []
-    return (cached.searches || [])
+    const data = await requestJson(`/api/storage/search-cache?playlist_url=${encodeURIComponent(url)}`)
+    const searches = data.searches || []
+    return searches
       .map((search) => {
         const trackIndex = tracks.findIndex((track) =>
           (search.trackKey && getSpotifyTrackId(track.spotify_url) === search.trackKey) ||
@@ -134,7 +147,7 @@ export function loadSearchCache(url, tracks) {
   }
 }
 
-export function saveSearchCache(url, searches) {
+export async function saveSearchCache(url, searches) {
   if (!url) return
   try {
     const cacheable = searches
@@ -146,6 +159,10 @@ export function saveSearchCache(url, searches) {
           results: Array.isArray(search.raw.results) ? search.raw.results.slice(0, 100) : [],
         },
       }))
-    localStorage.setItem(searchCacheKey(url), JSON.stringify({ savedAt: Date.now(), searches: cacheable }))
+    await request('/api/storage/search-cache', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_url: url, searches: cacheable }),
+    })
   } catch {}
 }

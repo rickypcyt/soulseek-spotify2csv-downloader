@@ -31,6 +31,7 @@ import {
 import { useConfig } from './hooks/useConfig'
 import { useDiagnostics } from './hooks/useDiagnostics'
 import { useDownloads } from './hooks/useDownloads'
+import { useLibraryIndex } from './hooks/useLibraryIndex'
 import { useLibraryOps } from './hooks/useLibraryOps'
 import { useLogs } from './hooks/useLogs'
 import { usePreview } from './hooks/usePreview'
@@ -39,26 +40,51 @@ import { useSpotifyAuth } from './hooks/useSpotifyAuth'
 import { useTabNavigation } from './hooks/useTabNavigation'
 
 function App() {
-  const [initialPlaylist] = useState(loadLastPlaylist)
-  const [url, setUrl] = useState(() => initialPlaylist.url || '')
-  const [outputFolderName, setOutputFolderName] = useState(
-    () => getOutputFolderPreference(initialPlaylist.url) ?? initialPlaylist.outputFolderName ?? ''
-  )
-  const [tracks, setTracks] = useState(() => initialPlaylist.tracks || [])
+  const [bootstrapped, setBootstrapped] = useState(false)
+  const [initialPlaylist, setInitialPlaylist] = useState({})
+  const [url, setUrl] = useState('')
+  const [outputFolderName, setOutputFolderName] = useState('')
+  const [tracks, setTracks] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [manualDownloadedTracks, setManualDownloadedTracks] = useState(() => new Set())
+  const [ignoredTracks, setIgnoredTracks] = useState(() => new Set())
   const [selected, setSelected] = useState(new Set())
-  const [urlHistory, setUrlHistory] = useState(loadHistory)
+  const [urlHistory, setUrlHistory] = useState([])
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
   const [previewPage, setPreviewPage] = useState(1)
   const [completedTransfersOpen, setCompletedTransfersOpen] = useState(false)
-  const [searchPreferences] = useState(loadSearchPreferences)
-  const [pickMode, setPickMode] = useState(() => searchPreferences.pickMode)
-  const [formatPref, setFormatPref] = useState(() => searchPreferences.formatPref)
+  const [pickMode, setPickMode] = useState('quality')
+  const [formatPref, setFormatPref] = useState('any')
+  const [initialSearches, setInitialSearches] = useState([])
   const logRef = useRef(null)
   const downloadSelectedTimers = useRef([])
+
+  // Cargar estado inicial desde SQLite (vía API) al montar
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const playlist = await loadLastPlaylist()
+      const history = await loadHistory()
+      const prefs = await loadSearchPreferences()
+      if (cancelled) return
+      setInitialPlaylist(playlist)
+      setUrl(playlist.url || '')
+      const folderPref = playlist.url ? await getOutputFolderPreference(playlist.url) : undefined
+      if (cancelled) return
+      setOutputFolderName(folderPref ?? playlist.outputFolderName ?? '')
+      setTracks(playlist.tracks || [])
+      setUrlHistory(history)
+      setPickMode(prefs.pickMode)
+      setFormatPref(prefs.formatPref)
+      const cached = await loadSearchCache(playlist.url || '', playlist.tracks || [])
+      if (cancelled) return
+      setInitialSearches(cached)
+      setBootstrapped(true)
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   // Limpiar timeouts pendientes de descarga masiva al desmontar.
   useEffect(() => {
@@ -72,6 +98,7 @@ function App() {
   const { navigate, activeTab } = useTabNavigation()
   const { config, setConfig, saveConfig, savingConfig } = useConfig()
   const { diagnostics, fetchDiagnostics } = useDiagnostics()
+  const { libraryIndex } = useLibraryIndex()
   const { logs, backendOnline } = useLogs()
   const { spotifyAuth, startSpotifyAuth } = useSpotifyAuth()
 
@@ -83,11 +110,7 @@ function App() {
     tracks,
     url,
     initialAutoSearchDone: (initialPlaylist.tracks || []).length > 0,
-    initialSearches: useMemo(
-      () => loadSearchCache(initialPlaylist.url || '', initialPlaylist.tracks || []),
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      []
-    ),
+    initialSearches,
   })
 
   const { downloads, enqueueDownload, cancelTrackDownload, getTrackDownloads, resetDownloads } = useDownloads({
@@ -129,7 +152,16 @@ function App() {
       .then((data) => {
         if (cancelled) return
         const statuses = data.statuses || {}
-        setManualDownloadedTracks(new Set(Object.entries(statuses).filter(([, downloaded]) => downloaded).map(([trackKey]) => trackKey)))
+        setManualDownloadedTracks(new Set(
+          Object.entries(statuses)
+            .filter(([, info]) => info && info.downloaded)
+            .map(([trackKey]) => trackKey)
+        ))
+        setIgnoredTracks(new Set(
+          Object.entries(statuses)
+            .filter(([, info]) => info && info.ignored)
+            .map(([trackKey]) => trackKey)
+        ))
       })
       .catch(() => {})
     return () => {
@@ -145,7 +177,7 @@ function App() {
   const loadPlaylist = useCallback(async (sourceUrl) => {
     const targetUrl = (sourceUrl || '').trim()
     if (!targetUrl || loading) return
-    const savedOutputFolder = getOutputFolderPreference(targetUrl)
+    const savedOutputFolder = await getOutputFolderPreference(targetUrl)
     setUrl(targetUrl)
     setOutputFolderName(savedOutputFolder ?? '')
     resetSearches()
@@ -163,7 +195,7 @@ function App() {
       if (!r.ok) throw new Error(data.error || 'Error')
       const loaded = data.tracks || []
       if (savedOutputFolder === undefined) setOutputFolderName(data.playlist_name || '')
-      const cachedSearches = loadSearchCache(targetUrl, loaded)
+      const cachedSearches = await loadSearchCache(targetUrl, loaded)
       setSearches(cachedSearches)
       setTracks(loaded)
       setSelected(new Set(loaded.map((_, i) => i)))
@@ -238,6 +270,7 @@ function App() {
 
   const isTrackDownloaded = (track) => {
     const trackKey = getSpotifyTrackId(track.spotify_url)
+    if (trackKey && libraryIndex?.[trackKey]) return true
     if (trackKey && diagnostics?.library_index?.[trackKey]) return true
     return (diagnostics?.downloads || [])
       .filter(isLibraryFile)
@@ -274,11 +307,41 @@ function App() {
     }
   }
 
-  const selectHistory = (selectedUrl) => {
+  const toggleIgnored = async (track, trackIndex) => {
+    if (!url) return
+    const key = trackIdentity(track)
+    const wasIgnored = ignoredTracks.has(key)
+    const ignored = !wasIgnored
+    setIgnoredTracks((current) => {
+      const next = new Set(current)
+      if (ignored) next.add(key)
+      else next.delete(key)
+      return next
+    })
+    try {
+      await requestJson('/api/playlist/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playlist_key: url, track_key: key, ignored }),
+      })
+      toast[ignored ? 'info' : 'info'](ignored ? `Ignorada: ${track.track_name}` : `Restaurada: ${track.track_name}`)
+    } catch (err) {
+      setIgnoredTracks((current) => {
+        const next = new Set(current)
+        if (wasIgnored) next.add(key)
+        else next.delete(key)
+        return next
+      })
+      toast.error('No se pudo guardar el estado: ' + err.message)
+    }
+  }
+
+  const selectHistory = async (selectedUrl) => {
     const saved = urlHistory.find((item) => item.url === selectedUrl)
     if (saved) {
       setUrl(saved.url)
-      setOutputFolderName(getOutputFolderPreference(saved.url) ?? saved.name)
+      const folder = await getOutputFolderPreference(saved.url)
+      setOutputFolderName(folder ?? saved.name)
     }
   }
 
@@ -412,11 +475,13 @@ function App() {
               getTrackSearch={getTrackSearch}
               isTrackDownloaded={isTrackDownloaded}
               manualDownloadedTracks={manualDownloadedTracks}
+              ignoredTracks={ignoredTracks}
               trackIdentity={trackIdentity}
               getTrackDownloads={getTrackDownloads}
               getSpotifyTrackId={getSpotifyTrackId}
               onToggleSelect={toggleSelect}
               onToggleManualDownloaded={toggleManualDownloaded}
+              onToggleIgnored={toggleIgnored}
               onUpdateQuery={updateQuery}
               onCopy={copy}
               onSearchTrack={searchTrack}
@@ -485,7 +550,7 @@ function App() {
         </div>
         <AppFooter />
         <ToastContainer
-          position="bottom-right"
+          position="top-left"
           autoClose={3500}
           theme="dark"
           newestOnTop
@@ -493,6 +558,7 @@ function App() {
           pauseOnFocusLoss
           draggable
           limit={4}
+          closeButton={false}
         />
       </div>
     </div>

@@ -17,6 +17,14 @@ if TYPE_CHECKING:
 def create_blueprint(state: RuntimeState) -> Blueprint:
     bp = Blueprint("library", __name__)
 
+    @bp.route("/api/library/index")
+    def api_library_index():
+        """Endpoint ligero: solo el índice de la biblioteca desde SQLite."""
+        try:
+            return jsonify({"library_index": state.library.index()})
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 500
+
     @bp.route("/api/library/folder", methods=["POST"])
     def api_library_folder():
         data = request.get_json() or {}

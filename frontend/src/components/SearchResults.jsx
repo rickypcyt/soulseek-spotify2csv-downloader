@@ -68,7 +68,7 @@ export default function SearchResults({
     )
   }
 
-  const results = expanded ? allResults : allResults.slice(0, limit)
+  const results = allResults
   const isBusy =
     activePreview && !activePreview.error && activePreview.state !== 'completado'
   const bestPick = pickBest(allResults, pickMode, formatPref)
@@ -98,17 +98,9 @@ export default function SearchResults({
       </summary>
       <div className="space-y-1.5 border-t border-[#2C303D] p-2.5">
         <p className="text-[11px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-          mostrando {results.length} de {total}
-          {total > results.length ? ` · +${total - results.length} más` : ''}
+          {total} resultado(s){total > 2 ? ' · scroll para ver más' : ''}
         </p>
-      {total > limit && (
-        <button
-          onClick={() => onToggleExpanded(s.searchId)}
-          className="mb-1 rounded border border-[#2C303D] px-2 py-1 text-[11px] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
-        >
-          {expanded ? 'mostrar menos' : `ver los ${total} resultados`}
-        </button>
-      )}
+      <div className="max-h-[260px] space-y-1.5 overflow-y-auto pr-1">
       {results.map((res, i) => {
         const resultDownload = getDownloadForResult(res)
         return (
@@ -225,6 +217,7 @@ export default function SearchResults({
         </div>
         )
       })}
+      </div>
       </div>
     </details>
   )

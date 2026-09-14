@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { TrackCardSkeleton } from './ui'
 import TrackCard from './TrackCard'
 
@@ -12,11 +13,13 @@ export default function TrackList({
   getTrackSearch,
   isTrackDownloaded,
   manualDownloadedTracks,
+  ignoredTracks,
   trackIdentity,
   getTrackDownloads,
   getSpotifyTrackId,
   onToggleSelect,
   onToggleManualDownloaded,
+  onToggleIgnored,
   onUpdateQuery,
   onCopy,
   onSearchTrack,
@@ -55,19 +58,78 @@ export default function TrackList({
     )
   }
 
+  const isDownloaded = (t, i) =>
+    isTrackDownloaded(t) ||
+    manualDownloadedTracks.has(trackIdentity(t)) ||
+    getTrackDownloads(i).some((d) => d.state === 'completado')
+
+  const isIgnored = (t) => ignoredTracks.has(trackIdentity(t))
+
+  const indexed = tracks.map((t, i) => ({ track: t, index: i, downloaded: isDownloaded(t, i), ignored: isIgnored(t) }))
+  const ignoredList = indexed.filter((item) => item.ignored && !item.downloaded)
+  const pendingTracks = indexed.filter((item) => !item.downloaded && !item.ignored)
+  const downloadedTracks = indexed.filter((item) => item.downloaded)
+  const downloadedCount = downloadedTracks.length
+  const ignoredCount = ignoredList.length
+
+  const renderCard = (item) => {
+    const { track: t, index: i } = item
+    return (
+      <TrackCard
+        key={i}
+        track={t}
+        index={i}
+        selected={selected.has(i)}
+        onToggleSelect={onToggleSelect}
+        actualDownloaded={isTrackDownloaded(t)}
+        manuallyDownloaded={manualDownloadedTracks.has(trackIdentity(t))}
+        onToggleManualDownloaded={onToggleManualDownloaded}
+        ignored={ignoredTracks.has(trackIdentity(t))}
+        onToggleIgnored={onToggleIgnored}
+        trackDownloads={getTrackDownloads(i)}
+        spotifyTrackId={getSpotifyTrackId(t.spotify_url)}
+        search={getTrackSearch(i)}
+        expandedSearches={expandedSearches}
+        onToggleExpandedSearch={onToggleExpandedSearch}
+        collapsedSearches={collapsedSearches}
+        onToggleCollapsedSearch={onToggleCollapsedSearch}
+        onUpdateQuery={onUpdateQuery}
+        onCopy={onCopy}
+        onSearchTrack={onSearchTrack}
+        pickMode={pickMode}
+        formatPref={formatPref}
+        activePreview={activePreview}
+        onStartPreview={onStartPreview}
+        onSavePreview={onSavePreview}
+        onDiscardPreview={onDiscardPreview}
+        onCancelPreview={onCancelPreview}
+        storedFileStreamUrl={storedFileStreamUrl}
+        storedFileUrl={storedFileUrl}
+        onCancelDownload={onCancelDownload}
+        onRefreshSearch={onRefreshSearch}
+        onCancelSearch={onCancelSearch}
+        embedOpen={activeEmbedIndex === i}
+        onToggleEmbed={() => setActiveEmbedIndex(activeEmbedIndex === i ? null : i)}
+      />
+    )
+  }
+
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-[#8D93A6]">
-          <input
-            type="checkbox"
-            checked={selected.size === tracks.length && tracks.length > 0}
-            onChange={(e) => onSelectAll(e.target.checked)}
-            className="h-3.5 w-3.5 cursor-pointer accent-white"
-          />
-          {selected.size} de {tracks.length} seleccionada
-          {selected.size === 1 ? '' : 's'}
-        </label>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-[#8D93A6]">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selected.size === tracks.length && tracks.length > 0}
+              onChange={(e) => onSelectAll(e.target.checked)}
+              className="h-3.5 w-3.5 cursor-pointer accent-white"
+            />
+            {selected.size} de {tracks.length} seleccionada{selected.size === 1 ? '' : 's'}
+          </label>
+          <span className="text-[#565C6E]">·</span>
+          <span>{tracks.length} en total · {pendingTracks.length} pendientes · {downloadedCount} descargadas{ignoredCount > 0 ? ` · ${ignoredCount} ignoradas` : ''}</span>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={onDownloadSelected}
@@ -95,44 +157,43 @@ export default function TrackList({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        {tracks.map((t, i) => (
-          <TrackCard
-            key={i}
-            track={t}
-            index={i}
-            selected={selected.has(i)}
-            onToggleSelect={onToggleSelect}
-            actualDownloaded={isTrackDownloaded(t)}
-            manuallyDownloaded={manualDownloadedTracks.has(trackIdentity(t))}
-            onToggleManualDownloaded={onToggleManualDownloaded}
-            trackDownloads={getTrackDownloads(i)}
-            spotifyTrackId={getSpotifyTrackId(t.spotify_url)}
-            search={getTrackSearch(i)}
-            expandedSearches={expandedSearches}
-            onToggleExpandedSearch={onToggleExpandedSearch}
-            collapsedSearches={collapsedSearches}
-            onToggleCollapsedSearch={onToggleCollapsedSearch}
-            onUpdateQuery={onUpdateQuery}
-            onCopy={onCopy}
-            onSearchTrack={onSearchTrack}
-            pickMode={pickMode}
-            formatPref={formatPref}
-            activePreview={activePreview}
-            onStartPreview={onStartPreview}
-            onSavePreview={onSavePreview}
-            onDiscardPreview={onDiscardPreview}
-            onCancelPreview={onCancelPreview}
-            storedFileStreamUrl={storedFileStreamUrl}
-            storedFileUrl={storedFileUrl}
-            onCancelDownload={onCancelDownload}
-            onRefreshSearch={onRefreshSearch}
-            onCancelSearch={onCancelSearch}
-            embedOpen={activeEmbedIndex === i}
-            onToggleEmbed={() => setActiveEmbedIndex(activeEmbedIndex === i ? null : i)}
-          />
-        ))}
-      </div>
+      {/* Descargadas (colapsable) */}
+      {downloadedTracks.length > 0 && (
+        <details className="group mb-6 rounded-lg border border-[#2C303D] bg-[#0D0F16]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-[#7FD8CC] [&::-webkit-details-marker]:hidden">
+            <span>Descargadas · {downloadedCount}</span>
+            <ChevronDown size={14} className="shrink-0 transition-transform duration-150 group-open:rotate-180" />
+          </summary>
+          <div className="grid grid-cols-1 gap-4 border-t border-[#2C303D] p-3 xl:grid-cols-2">
+            {downloadedTracks.map(renderCard)}
+          </div>
+        </details>
+      )}
+
+      {/* Ignoradas (colapsable) */}
+      {ignoredCount > 0 && (
+        <details className="group mb-6 rounded-lg border border-[#2C303D] bg-[#0D0F16]">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-xs font-medium uppercase tracking-[0.14em] text-[#8D93A6] [&::-webkit-details-marker]:hidden">
+            <span>Ignoradas · {ignoredCount}</span>
+            <ChevronDown size={14} className="shrink-0 transition-transform duration-150 group-open:rotate-180" />
+          </summary>
+          <div className="grid grid-cols-1 gap-4 border-t border-[#2C303D] p-3 xl:grid-cols-2">
+            {ignoredList.map(renderCard)}
+          </div>
+        </details>
+      )}
+
+      {/* Pendientes */}
+      {pendingTracks.length > 0 && (
+        <div>
+          <h3 className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-[#8D93A6]">
+            Pendientes · {pendingTracks.length}
+          </h3>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            {pendingTracks.map(renderCard)}
+          </div>
+        </div>
+      )}
     </>
   )
 }

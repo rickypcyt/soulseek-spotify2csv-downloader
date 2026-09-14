@@ -43,11 +43,17 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         playlist_key = str(data.get("playlist_key", "")).strip()
         track_key = str(data.get("track_key", "")).strip()
         downloaded = data.get("downloaded")
-        if not playlist_key or not track_key or not isinstance(downloaded, bool):
-            return jsonify({"error": "playlist_key, track_key y downloaded son obligatorios"}), 400
+        ignored = data.get("ignored")
+        if not playlist_key or not track_key:
+            return jsonify({"error": "playlist_key y track_key son obligatorios"}), 400
+        if downloaded is None and ignored is None:
+            return jsonify({"error": "Se requiere downloaded o ignored"}), 400
         try:
-            set_playlist_track_status(playlist_key, track_key, downloaded)
-            return jsonify({"ok": True, "playlist_key": playlist_key, "track_key": track_key, "downloaded": downloaded})
+            current = get_playlist_track_statuses(playlist_key).get(track_key, {"downloaded": False, "ignored": False})
+            dl = current["downloaded"] if downloaded is None else downloaded
+            ign = current["ignored"] if ignored is None else ignored
+            set_playlist_track_status(playlist_key, track_key, dl, ign)
+            return jsonify({"ok": True, "playlist_key": playlist_key, "track_key": track_key, "downloaded": dl, "ignored": ign})
         except Exception as exc:
             state.logs.add(f"[playlist] Error al guardar estado: {exc}")
             return jsonify({"error": str(exc)}), 500

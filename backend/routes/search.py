@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from flask import Blueprint, jsonify, request
 
-from backend.slskd_client import MAX_ACTIVE_SEARCHES, MAX_SEARCH_QUERY_LENGTH
+from backend.slskd_client import MAX_SEARCH_QUERY_LENGTH
 
 if TYPE_CHECKING:
     from backend.runtime import RuntimeState
@@ -26,9 +26,6 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             return jsonify({"error": "Falta query"}), 400
         if len(query) > MAX_SEARCH_QUERY_LENGTH:
             return jsonify({"error": f"La búsqueda no puede superar {MAX_SEARCH_QUERY_LENGTH} caracteres"}), 400
-        state.slskd._prune_active_searches()
-        if len(state.slskd.active_search_ids) >= MAX_ACTIVE_SEARCHES:
-            return jsonify({"error": "Hay demasiadas búsquedas activas. Espera unos segundos e inténtalo de nuevo."}), 429
         body, status = state.slskd.create_search(query)
         return jsonify(body), status
 
