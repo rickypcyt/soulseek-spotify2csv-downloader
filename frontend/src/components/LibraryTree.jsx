@@ -18,6 +18,7 @@ export default function LibraryTree({
   onMoveFile,
   storedFileStreamUrl,
   onDeleteFile,
+  coverByPath,
 }) {
   const folders = Object.entries(node.folders).sort(([a], [b]) => a.localeCompare(b))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
@@ -89,40 +90,46 @@ export default function LibraryTree({
                 onMoveFile={onMoveFile}
                 storedFileStreamUrl={storedFileStreamUrl}
                 onDeleteFile={onDeleteFile}
+                coverByPath={coverByPath}
               />
             </div>
           </details>
         )
       })}
-      {files.map((file) => (
-        isPlayableFile(file) ? (
-          <LibraryAudioCard
-            key={file.path}
-            file={file}
-            streamUrl={storedFileStreamUrl('downloads', file.path)}
-            formatSize={formatSize}
-            dragDir="downloads"
-            onDelete={(path) => {
-              if (confirm(`¿Borrar ${path}?`)) onDeleteFile(path, 'downloads')
-            }}
-          />
-        ) : (
-          <div key={file.path} className="w-full min-w-0 rounded-lg border border-[#2C303D] bg-[#161822] p-3">
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-[13px] text-[#E9EAF0]" title={file.path}>{file.name}</span>
-              <span className="shrink-0 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>{formatSize(file.size)}</span>
-              <button
-                onClick={() => {
-                  if (confirm(`¿Borrar ${file.path}?`)) onDeleteFile(file.path, 'downloads')
+      {files.length > 0 && (
+        <div className="max-h-[150px] space-y-3 overflow-y-auto pr-1">
+          {files.map((file) => (
+            isPlayableFile(file) ? (
+              <LibraryAudioCard
+                key={file.path}
+                file={file}
+                streamUrl={storedFileStreamUrl('downloads', file.path)}
+                coverUrl={coverByPath?.[file.path] || ''}
+                formatSize={formatSize}
+                dragDir="downloads"
+                onDelete={(path) => {
+                  if (confirm(`¿Borrar ${path}?`)) onDeleteFile(path, 'downloads')
                 }}
-                className="shrink-0 rounded border border-[#6B7280]/40 px-2 py-1 text-[10px] text-[#8D93A6] hover:border-[#6B7280] hover:text-[#E9EAF0]"
-              >
-                borrar
-              </button>
-            </div>
-          </div>
-        )
-      ))}
+              />
+            ) : (
+              <div key={file.path} className="w-full min-w-0 rounded-lg border border-[#2C303D] bg-[#161822] p-3">
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-[13px] text-[#E9EAF0]" title={file.path}>{file.name}</span>
+                  <span className="shrink-0 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>{formatSize(file.size)}</span>
+                  <button
+                    onClick={() => {
+                      if (confirm(`¿Borrar ${file.path}?`)) onDeleteFile(file.path, 'downloads')
+                    }}
+                    className="shrink-0 rounded border border-[#6B7280]/40 px-2 py-1 text-[10px] text-[#8D93A6] hover:border-[#6B7280] hover:text-[#E9EAF0]"
+                  >
+                    borrar
+                  </button>
+                </div>
+              </div>
+            )
+          ))}
+        </div>
+      )}
     </div>
   )
 }

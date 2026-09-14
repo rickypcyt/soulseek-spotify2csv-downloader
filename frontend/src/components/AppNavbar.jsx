@@ -1,4 +1,4 @@
-import { CheckCircle2, LoaderCircle } from 'lucide-react'
+import { CheckCircle2, LoaderCircle, Search } from 'lucide-react'
 
 const TAB_PATHS = {
   main: '/',
@@ -9,7 +9,7 @@ const TAB_PATHS = {
 
 const FONT_MONO = "'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace"
 
-export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDownloadCount, queuedDownloadCount, activeDownloadCount }) {
+export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDownloadCount, queuedDownloadCount, activeDownloadCount, activeSearchCount }) {
   const tabButton = (tab, label) => (
     <button
       key={tab}
@@ -45,6 +45,12 @@ export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDo
                 {pendingDownloadCount}
               </span>
             </div>
+            <div className="flex items-center gap-1.5 text-xs">
+              <Search size={13} className={activeSearchCount ? 'animate-spin text-[#7FD8CC]' : 'text-[#565C6E]'} />
+              <span className={activeSearchCount ? 'text-[#7FD8CC]' : 'text-[#565C6E]'} style={{ fontFamily: FONT_MONO }}>
+                {activeSearchCount}
+              </span>
+            </div>
 
             {/* Menú on hover */}
             <div className="pointer-events-none invisible absolute right-0 top-full z-40 mt-2 w-64 rounded-lg border border-[#343949] bg-[#161822] p-3 opacity-0 shadow-[0_14px_32px_rgba(0,0,0,0.35)] transition-opacity duration-150 group-hover:visible group-hover:opacity-100 group-hover:pointer-events-auto">
@@ -60,6 +66,10 @@ export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDo
                 <div className="flex items-center justify-between gap-3 text-xs">
                   <span className="flex items-center gap-2 text-[#8D93A6]"><LoaderCircle size={14} className={pendingDownloadCount ? 'animate-spin text-[#FFFFFF]' : 'text-[#565C6E]'} /> pendientes o en cola</span>
                   <strong className={pendingDownloadCount ? 'text-[#FFFFFF]' : 'text-[#565C6E]'}>{pendingDownloadCount}</strong>
+                </div>
+                <div className="flex items-center justify-between gap-3 text-xs">
+                  <span className="flex items-center gap-2 text-[#8D93A6]"><Search size={14} className={activeSearchCount ? 'animate-spin text-[#7FD8CC]' : 'text-[#565C6E]'} /> búsquedas activas en Soulseek</span>
+                  <strong className={activeSearchCount ? 'text-[#7FD8CC]' : 'text-[#565C6E]'}>{activeSearchCount}</strong>
                 </div>
                 <div className="flex items-center justify-between pl-6 text-[10px] text-[#565C6E]" style={{ fontFamily: FONT_MONO }}>
                   <span>en cola · {queuedDownloadCount}</span>

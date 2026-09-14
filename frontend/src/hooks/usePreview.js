@@ -42,6 +42,7 @@ export function usePreview({ tracks, outputFolderName, fetchDiagnostics }) {
           track_key: activePreview.trackKey,
           track_name: activePreview.trackName,
           artists: activePreview.artists,
+          cover_url: activePreview.coverUrl,
         }),
       })
       setActivePreview((current) => ({ ...current, savedPath: data.path }))
@@ -79,6 +80,7 @@ export function usePreview({ tracks, outputFolderName, fetchDiagnostics }) {
       trackKey: getSpotifyTrackId(tracks[trackIndex]?.spotify_url),
       trackName: tracks[trackIndex]?.track_name,
       artists: tracks[trackIndex]?.artists,
+      coverUrl: tracks[trackIndex]?.cover_url,
       size: res.size,
       state: 'encolando',
       percent: 0,

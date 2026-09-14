@@ -1,5 +1,5 @@
 import { CheckCircle2, Clock3, EyeOff } from 'lucide-react'
-import { Chip } from './ui'
+import { Checkbox, Chip } from './ui'
 import SearchResults from './SearchResults'
 import SpotifyEmbed from './SpotifyEmbed'
 import { FONT_MONO, RESULTS_PER_TRACK, formatDuration } from '../constants'
@@ -50,23 +50,14 @@ export default function TrackCard({
       style={{ animationDelay: `${i * 40}ms` }}
     >
       <div className="flex items-start gap-3">
-        <div className="flex shrink-0 flex-col items-center gap-1.5">
-          <input
-            type="checkbox"
+        <div className="flex shrink-0 flex-col items-center gap-1.5 pt-0.5">
+          <Checkbox
             checked={selected}
             onChange={() => onToggleSelect(i)}
             title="Seleccionar pista"
-            className="h-3.5 w-3.5 cursor-pointer accent-white"
           />
         </div>
         <div className="min-w-0 flex-1">
-          <div
-            className="mb-1 flex h-7 w-7 items-center justify-center rounded-md bg-[#0D0F16] text-xs text-[#8D93A6]"
-            style={{ fontFamily: FONT_MONO }}
-            aria-label={`Track ${i + 1}`}
-          >
-            {String(i + 1).padStart(2, '0')}
-          </div>
           <h3 className="truncate text-[15px] font-medium leading-tight text-[#E9EAF0]">
             {t.track_name}
           </h3>

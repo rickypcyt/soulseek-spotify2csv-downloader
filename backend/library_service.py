@@ -43,8 +43,8 @@ class LibraryService:
     def index(self) -> dict[str, dict[str, str]]:
         return get_library_index()
 
-    def register_track(self, track_key, track_name, artists, path) -> None:
-        _register_database_track(track_key, track_name, artists, path)
+    def register_track(self, track_key, track_name, artists, path, cover_url="") -> None:
+        _register_database_track(track_key, track_name, artists, path, cover_url)
 
     def move_path(self, old_path: str, new_path: str) -> None:
         _move_database_path(old_path, new_path)

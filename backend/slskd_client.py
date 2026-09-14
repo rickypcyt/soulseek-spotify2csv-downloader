@@ -401,6 +401,7 @@ class SlskdClient:
                 metadata.get("track_name"),
                 metadata.get("artists"),
                 rel,
+                metadata.get("cover_url", ""),
             )
         self.pending_folders.pop(download_key, None)
         return {"state": "Completed", "path": rel, "saved": True, "percentComplete": 100}

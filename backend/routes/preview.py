@@ -117,6 +117,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         track_key = str(data.get("track_key", "")).strip()
         track_name = str(data.get("track_name", "")).strip()
         artists = str(data.get("artists", "")).strip()
+        cover_url = str(data.get("cover_url", "")).strip()
         if not rel:
             return jsonify({"error": "Falta el archivo de preview"}), 400
         try:
@@ -136,7 +137,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                 else:
                     move_file_with_retry(source, destination)
             saved_path = os.path.relpath(destination, state.current_downloads_dir).replace("\\", "/")
-            state.library.register_track(track_key, track_name, artists, saved_path)
+            state.library.register_track(track_key, track_name, artists, saved_path, cover_url)
             state.logs.add(f"[library] preview guardado en {saved_path}")
             return jsonify({"ok": True, "path": saved_path, "folder": safe_dirname(folder_name)})
         except Exception as exc:

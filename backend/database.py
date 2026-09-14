@@ -43,6 +43,7 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
                 track_name TEXT NOT NULL,
                 artists TEXT NOT NULL,
                 path TEXT NOT NULL,
+                cover_url TEXT NOT NULL DEFAULT '',
                 downloaded_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS playlist_track_status (
@@ -90,6 +91,11 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
         # Migración: añadir columna 'ignored' si no existe (DBs existentes)
         try:
             connection.execute("ALTER TABLE playlist_track_status ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0 CHECK(ignored IN (0, 1))")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+        # Migración: añadir columna 'cover_url' si no existe (DBs existentes)
+        try:
+            connection.execute("ALTER TABLE library_tracks ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass  # La columna ya existe
         migrated = connection.execute(
@@ -175,6 +181,7 @@ def get_library_index(db_path: Path = DB_PATH) -> dict[str, dict[str, str]]:
             "track_name": row["track_name"],
             "artists": row["artists"],
             "path": row["path"],
+            "cover_url": row["cover_url"],
         }
         for row in rows
     }
@@ -216,15 +223,15 @@ def set_playlist_track_status(playlist_key: str, track_key: str, downloaded: boo
             )
 
 
-def register_library_track(track_key: str, track_name: str, artists: str, path: str, db_path: Path = DB_PATH) -> None:
+def register_library_track(track_key: str, track_name: str, artists: str, path: str, cover_url: str = "", db_path: Path = DB_PATH) -> None:
     if not track_key:
         return
     initialize_database(db_path=db_path)
     with _connect(db_path) as connection:
         connection.execute(
-            "INSERT INTO library_tracks(track_key, track_name, artists, path, downloaded_at) VALUES (?, ?, ?, ?, ?) "
-            "ON CONFLICT(track_key) DO UPDATE SET track_name=excluded.track_name, artists=excluded.artists, path=excluded.path, downloaded_at=excluded.downloaded_at",
-            (str(track_key), str(track_name or ""), str(artists or ""), str(path), _now()),
+            "INSERT INTO library_tracks(track_key, track_name, artists, path, cover_url, downloaded_at) VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(track_key) DO UPDATE SET track_name=excluded.track_name, artists=excluded.artists, path=excluded.path, cover_url=excluded.cover_url, downloaded_at=excluded.downloaded_at",
+            (str(track_key), str(track_name or ""), str(artists or ""), str(path), str(cover_url or ""), _now()),
         )
 
 

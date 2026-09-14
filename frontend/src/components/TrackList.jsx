@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import { TrackCardSkeleton } from './ui'
+import { Checkbox, TrackCardSkeleton } from './ui'
 import TrackCard from './TrackCard'
 
 export default function TrackList({
@@ -119,11 +119,11 @@ export default function TrackList({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3 text-sm text-[#8D93A6]">
           <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={selected.size === tracks.length && tracks.length > 0}
-              onChange={(e) => onSelectAll(e.target.checked)}
-              className="h-3.5 w-3.5 cursor-pointer accent-white"
+              indeterminate={selected.size > 0 && selected.size < tracks.length}
+              onChange={(checked) => onSelectAll(checked)}
+              title="Seleccionar todas"
             />
             {selected.size} de {tracks.length} seleccionada{selected.size === 1 ? '' : 's'}
           </label>

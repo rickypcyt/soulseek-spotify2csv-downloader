@@ -1,3 +1,5 @@
+import { Check, Minus } from 'lucide-react'
+
 export function StatusDot({ ok }) {
   return (
     <span className="relative flex h-2 w-2">
@@ -8,6 +10,32 @@ export function StatusDot({ ok }) {
         className={`relative inline-flex h-2 w-2 rounded-full ${ok ? 'bg-[#FFFFFF]' : 'bg-[#6B7280]'}`}
       />
     </span>
+  )
+}
+
+export function Checkbox({ checked, indeterminate = false, onChange, title, size = 12 }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={indeterminate ? 'mixed' : checked}
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation()
+        onChange?.(!checked)
+      }}
+      className={`flex shrink-0 items-center justify-center rounded-[2px] border transition-colors ${indeterminate || checked
+        ? 'border-[#FFFFFF] bg-[#FFFFFF] text-[#161822]'
+        : 'border-[#565C6E] bg-[#0D0F16] text-transparent hover:border-[#8D93A6]'
+      }`}
+      style={{ height: size, width: size }}
+    >
+      {indeterminate ? (
+        <Minus size={size - 6} strokeWidth={3} />
+      ) : checked ? (
+        <Check size={size - 6} strokeWidth={3.5} />
+      ) : null}
+    </button>
   )
 }
 

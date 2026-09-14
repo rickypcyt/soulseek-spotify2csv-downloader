@@ -25,6 +25,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         track_key = str(data.get("track_key", "")).strip()
         track_name = str(data.get("track_name", "")).strip()
         artists = str(data.get("artists", "")).strip()
+        cover_url = str(data.get("cover_url", "")).strip()
         if not username or not filename:
             return jsonify({"error": "falta username o filename"}), 400
         body, status = state.slskd.enqueue_transfer(username, filename, size, label="download")
@@ -35,6 +36,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                 "track_key": track_key,
                 "track_name": track_name,
                 "artists": artists,
+                "cover_url": cover_url,
             }
         return jsonify(body), status
 

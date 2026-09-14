@@ -10,6 +10,7 @@ export default function LibraryPanel({
   diagnostics,
   libraryFiles,
   libraryFolders,
+  coverByPath,
   dragOverFolder,
   onDragOverFolder,
   onMoveFile,
@@ -84,6 +85,7 @@ export default function LibraryPanel({
               onMoveFile={onMoveFile}
               storedFileStreamUrl={storedFileStreamUrl}
               onDeleteFile={onDeleteFile}
+              coverByPath={coverByPath}
             />
           ) : (
             <p className="text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>la carpeta está vacía</p>

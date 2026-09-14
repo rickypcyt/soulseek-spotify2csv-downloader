@@ -102,18 +102,21 @@ def fetch_tracks(sp, link_type, link_id):
 def write_csv(tracks, filename):
     with open(filename, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["track_name", "artists", "album", "duration_ms", "spotify_url", "spotify_preview", "search_query"])
+        writer.writerow(["track_name", "artists", "album", "duration_ms", "spotify_url", "spotify_preview", "search_query", "cover_url"])
 
         for track in tracks:
             name = track.get("name", "")
             artists = " ".join(a["name"] for a in track.get("artists", []))
-            album = track.get("album", {}).get("name", "") if isinstance(track.get("album"), dict) else ""
+            album = track.get("album", {}) if isinstance(track.get("album"), dict) else {}
+            album_name = album.get("name", "")
+            images = album.get("images", []) if isinstance(album, dict) else []
+            cover_url = images[-1]["url"] if images else ""
             duration = track.get("duration_ms", "")
             url = track.get("external_urls", {}).get("spotify", "")
             preview = track.get("preview_url", "") or ""
             search_query = f"{artists} {name}".strip()
 
-            writer.writerow([name, artists, album, duration, url, preview, search_query])
+            writer.writerow([name, artists, album_name, duration, url, preview, search_query, cover_url])
 
 
 def main():

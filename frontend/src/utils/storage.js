@@ -139,6 +139,7 @@ export async function loadSearchCache(url, tracks) {
               searchId: null,
               status: 'completed',
               cached: true,
+              raw: search.raw ? { ...search.raw, status: 'completed', state: 'completed' } : search.raw,
             }
       })
       .filter(Boolean)
@@ -150,12 +151,16 @@ export async function loadSearchCache(url, tracks) {
 export async function saveSearchCache(url, searches) {
   if (!url) return
   try {
+    const TERMINAL = new Set(['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'])
     const cacheable = searches
-      .filter((search) => search.raw)
+      .filter((search) => search.raw && TERMINAL.has(String(search.status || search.raw?.status || '').toLowerCase()))
       .map((search) => ({
         ...search,
+        status: 'completed',
         raw: {
           ...search.raw,
+          status: 'completed',
+          state: 'completed',
           results: Array.isArray(search.raw.results) ? search.raw.results.slice(0, 100) : [],
         },
       }))

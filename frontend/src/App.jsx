@@ -103,13 +103,12 @@ function App() {
   const { spotifyAuth, startSpotifyAuth } = useSpotifyAuth()
 
   const {
-    setSearches, searchTrack, autoSearchAll, refreshSearch, cancelSearch,
+    searches, setSearches, searchTrack, autoSearchAll, refreshSearch, cancelSearch,
     getTrackSearch, expandedSearches, collapsedSearches,
     toggleExpandedSearch, toggleCollapsedSearch, collapseTrackResults, resetSearches,
   } = useSearches({
     tracks,
     url,
-    initialAutoSearchDone: (initialPlaylist.tracks || []).length > 0,
     initialSearches,
   })
 
@@ -364,6 +363,15 @@ function App() {
     [diagnostics]
   )
   const libraryFolders = diagnostics?.download_directories || []
+  const coverByPath = useMemo(() => {
+    const map = {}
+    if (libraryIndex) {
+      for (const entry of Object.values(libraryIndex)) {
+        if (entry?.path) map[entry.path] = entry.cover_url || ''
+      }
+    }
+    return map
+  }, [libraryIndex])
   const previewFiles = diagnostics?.previews || []
   const previewPages = Math.max(1, Math.ceil(previewFiles.length / PREVIEW_PAGE_SIZE))
   const currentPreviewPage = Math.min(previewPage, previewPages)
@@ -375,6 +383,9 @@ function App() {
   const queuedDownloadCount = downloadEntries.filter((download) => download.state === 'encolando').length
   const activeDownloadCount = downloadEntries.filter((download) => download.state === 'descargando').length
   const pendingDownloadCount = queuedDownloadCount + activeDownloadCount
+  const activeSearchCount = searches.filter(
+    (s) => s.searchId && !['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'].includes(String(s.status || '').toLowerCase())
+  ).length
   const transfers = diagnostics?.transfers || []
   const activeTransfers = transfers.filter((transfer) => !isCompletedTransfer(transfer))
   const completedTransfers = transfers.filter(isCompletedTransfer)
@@ -392,6 +403,7 @@ function App() {
           pendingDownloadCount={pendingDownloadCount}
           queuedDownloadCount={queuedDownloadCount}
           activeDownloadCount={activeDownloadCount}
+          activeSearchCount={activeSearchCount}
         />
 
         {activeTab === 'main' && (
@@ -516,6 +528,7 @@ function App() {
                 diagnostics={diagnostics}
                 libraryFiles={libraryFiles}
                 libraryFolders={libraryFolders}
+                coverByPath={coverByPath}
                 dragOverFolder={dragOverLibraryFolder}
                 onDragOverFolder={setDragOverLibraryFolder}
                 onMoveFile={moveLibraryFile}

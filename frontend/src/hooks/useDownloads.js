@@ -71,6 +71,7 @@ export function useDownloads({ tracks, outputFolderName, fetchDiagnostics, colla
           track_key: getSpotifyTrackId(tracks[i]?.spotify_url),
           track_name: tracks[i]?.track_name,
           artists: tracks[i]?.artists,
+          cover_url: tracks[i]?.cover_url,
         }),
       })
       const data = await r.json()

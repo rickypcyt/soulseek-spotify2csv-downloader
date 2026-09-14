@@ -4,9 +4,8 @@ import { request, requestJson } from '../api/client'
 import { getSpotifyTrackId } from '../utils/spotify'
 import { saveSearchCache } from '../utils/storage'
 
-const SEARCH_BATCH_SIZE = 6
-const SEARCH_BATCH_DELAY_MS = 700
 const SEARCH_POLL_INTERVAL_MS = 1500
+const SEARCH_QUEUE_DELAY_MS = 800
 
 const TERMINAL_STATUSES = new Set(['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'])
 
@@ -17,67 +16,109 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
 
   const searchesRef = useRef(searches)
   const searchPollInFlight = useRef(false)
-  const autoSearchStarted = useRef(initialAutoSearchDone)
-  const autoSearchTimeouts = useRef([])
+  const searchQueueRef = useRef([])
+  const searchRunningRef = useRef(false)
+
+  // Sincronizar initialSearches cuando lleguen desde el bootstrap async.
+  // useState(initialSearches) solo usa el valor en el primer render; si el
+  // bootstrap completa después, necesitamos inyectar las búsquedas cacheadas.
+  useEffect(() => {
+    if (initialSearches.length > 0 && searchesRef.current.length === 0) {
+      setSearches(initialSearches)
+    }
+  }, [initialSearches])
+
+  // Cola de búsquedas: procesar una a la vez para no saturar slskd.
+  const processSearchQueue = useCallback(async () => {
+    if (searchRunningRef.current) return
+    const next = searchQueueRef.current.shift()
+    if (!next) return
+    searchRunningRef.current = true
+    try {
+      await next.fn()
+    } finally {
+      searchRunningRef.current = false
+      if (searchQueueRef.current.length > 0) {
+        setTimeout(processSearchQueue, SEARCH_QUEUE_DELAY_MS)
+      }
+    }
+  }, [])
+
+  const enqueueSearch = useCallback((fn) => {
+    searchQueueRef.current.push({ fn })
+    processSearchQueue()
+  }, [processSearchQueue])
 
   // Buscar en Soulseek para una pista en particular
   const searchTrack = useCallback(async (i, query) => {
     const q = (query || '').trim()
     if (!q) return
 
-    // Reemplazar búsqueda anterior de la misma pista
-    setSearches((prev) => prev.filter((s) => s.trackIndex !== i))
+    enqueueSearch(async () => {
+      // Reemplazar búsqueda anterior de la misma pista
+      setSearches((prev) => prev.filter((s) => s.trackIndex !== i))
 
-    try {
-      const r = await request('/api/search_soulseek', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
-      })
-      const data = await r.json()
-      if (!r.ok) {
-        toast.error(data.error || 'Error')
-        return
+      try {
+        const r = await request('/api/search_soulseek', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: q }),
+        })
+        const data = await r.json()
+        if (!r.ok) {
+          toast.error(data.error || 'Error')
+          return
+        }
+        setSearches((prev) => [
+          ...prev,
+          {
+            searchId: data.searchId,
+            trackIndex: i,
+            trackKey: getSpotifyTrackId(tracks[i]?.spotify_url),
+            query: data.query,
+            resultsCount: data.resultsCount,
+            status: data.status || 'buscando',
+            pollCount: 0,
+            raw: null,
+          },
+        ])
+      } catch (err) {
+        toast.error('Error: ' + err.message)
       }
-      setSearches((prev) => [
-        ...prev,
-        {
-          searchId: data.searchId,
-          trackIndex: i,
-          trackKey: getSpotifyTrackId(tracks[i]?.spotify_url),
-          query: data.query,
-          resultsCount: data.resultsCount,
-          status: data.status || 'buscando',
-          pollCount: 0,
-          raw: null,
-        },
-      ])
-    } catch (err) {
-      toast.error('Error: ' + err.message)
-    }
-  }, [tracks])
+    })
+  }, [tracks, enqueueSearch])
 
   const autoSearchAll = useCallback(() => {
-    autoSearchTimeouts.current.forEach(clearTimeout)
-    autoSearchTimeouts.current = []
+    searchQueueRef.current = []
     tracks.forEach((t, i) => {
       if (searchesRef.current.some((search) => search.trackIndex === i && search.cached)) return
-      const batch = Math.floor(i / SEARCH_BATCH_SIZE)
-      const id = setTimeout(
-        () => searchTrack(i, t.search_query),
-        batch * SEARCH_BATCH_DELAY_MS
-      )
-      autoSearchTimeouts.current.push(id)
+      enqueueSearch(async () => {
+        setSearches((prev) => prev.filter((s) => s.trackIndex !== i))
+        try {
+          const r = await request('/api/search_soulseek', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: t.search_query }),
+          })
+          const data = await r.json()
+          if (!r.ok) return
+          setSearches((prev) => [
+            ...prev,
+            {
+              searchId: data.searchId,
+              trackIndex: i,
+              trackKey: getSpotifyTrackId(tracks[i]?.spotify_url),
+              query: data.query,
+              resultsCount: data.resultsCount,
+              status: data.status || 'buscando',
+              pollCount: 0,
+              raw: null,
+            },
+          ])
+        } catch {}
+      })
     })
-  }, [tracks, searchTrack])
-
-  // Auto-buscar al cargar una playlist
-  useEffect(() => {
-    if (tracks.length > 0 && !autoSearchStarted.current) {
-      autoSearchStarted.current = true
-      autoSearchAll()
-    }
-  }, [tracks, autoSearchAll])
+  }, [tracks, enqueueSearch])
 
   // Keep a ref in sync so the polling loop always reads the latest searches.
   useEffect(() => {
@@ -145,10 +186,11 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
     }
   }, [])
 
-  // Clear all search timers on unmount.
+  // Limpiar cola de búsquedas al desmontar.
   useEffect(() => {
     return () => {
-      autoSearchTimeouts.current.forEach(clearTimeout)
+      searchQueueRef.current = []
+      searchRunningRef.current = false
     }
   }, [])
 
@@ -213,12 +255,11 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
   }, [searches])
 
   const resetSearches = useCallback(() => {
-    autoSearchTimeouts.current.forEach(clearTimeout)
-    autoSearchTimeouts.current = []
+    searchQueueRef.current = []
+    searchRunningRef.current = false
     setSearches([])
     setExpandedSearches(new Set())
     setCollapsedSearches(new Set())
-    autoSearchStarted.current = false
   }, [])
 
   return {

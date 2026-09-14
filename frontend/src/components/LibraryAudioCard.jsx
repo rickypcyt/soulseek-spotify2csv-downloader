@@ -1,4 +1,4 @@
-import { Download, Pause, Play, Trash2 } from 'lucide-react'
+import { Download, Music, Pause, Play, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 const FILE_DRAG_TYPE = 'application/x-soulseek-file'
@@ -17,7 +17,7 @@ function formatBitrate(bytes, durationSeconds) {
   return `${Math.round((Number(bytes) * 8) / durationSeconds / 1000)} kbps`
 }
 
-export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, formatSize, onDelete, dragDir, onMoveStart }) {
+export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, formatSize, onDelete, dragDir, onMoveStart, coverUrl }) {
   const audioRef = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [duration, setDuration] = useState(0)
@@ -62,15 +62,18 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
       className="w-full min-w-0 cursor-grab rounded-lg border border-[#2C303D] bg-[#161822] p-2 shadow-[0_8px_24px_rgba(0,0,0,0.14)] active:cursor-grabbing"
     >
       <div className="flex min-w-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={togglePlayback}
-          aria-label={playing ? `Pausar ${file.name}` : `Reproducir ${file.name}`}
-          title={playing ? 'Pausar' : 'Reproducir'}
-          className="flex h-8 w-8 min-h-8 min-w-8 shrink-0 aspect-square items-center justify-center rounded-full bg-[#FFFFFF] p-0 text-[#161822] transition-transform hover:scale-105"
-        >
-          {playing ? <Pause size={14} strokeWidth={2.5} /> : <Play size={14} strokeWidth={2.5} className="ml-0.5" />}
-        </button>
+        {coverUrl ? (
+          <img
+            src={coverUrl}
+            alt=""
+            loading="lazy"
+            className="h-10 w-10 min-h-10 min-w-10 shrink-0 rounded object-cover"
+          />
+        ) : (
+          <span className="flex h-10 w-10 min-h-10 min-w-10 shrink-0 items-center justify-center rounded bg-[#0D0F16] text-[#565C6E]">
+            <Music size={16} strokeWidth={2} />
+          </span>
+        )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-[12px] font-medium text-[#E9EAF0]" title={file.path}>{file.name}</p>
           <div className="mt-0.5 flex items-center gap-1.5 truncate text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
@@ -105,6 +108,15 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
             <span className="hidden xl:inline">descargar</span>
           </a>
         ) : null}
+        <button
+          type="button"
+          onClick={togglePlayback}
+          aria-label={playing ? `Pausar ${file.name}` : `Reproducir ${file.name}`}
+          title={playing ? 'Pausar' : 'Reproducir'}
+          className="flex h-7 w-7 min-h-7 min-w-7 shrink-0 items-center justify-center rounded-full bg-[#FFFFFF] p-0 text-[#161822] transition-transform hover:scale-105"
+        >
+          {playing ? <Pause size={13} strokeWidth={2.5} /> : <Play size={13} strokeWidth={2.5} className="ml-0.5" />}
+        </button>
         <button
           type="button"
           onClick={() => {
