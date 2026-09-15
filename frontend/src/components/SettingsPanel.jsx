@@ -1,4 +1,4 @@
-export default function SettingsPanel({ config, onChange, onSave, saving, spotifyAuth, onStartSpotifyAuth, open = false }) {
+export default function SettingsPanel({ config, onChange, onSave, saving, open = false }) {
   const update = (key, value) => onChange((current) => ({ ...current, [key]: value }))
 
   return (
@@ -6,36 +6,6 @@ export default function SettingsPanel({ config, onChange, onSave, saving, spotif
       <summary className="cursor-pointer px-5 py-4 text-base font-semibold text-slate-100">
         Configuración local
       </summary>
-      <div className="border-t border-slate-600 p-5">
-        <div className={`rounded-lg border p-4 ${spotifyAuth?.status === 'authenticated' ? 'border-blue-400/40 bg-blue-400/10' : 'border-slate-600 bg-slate-900/40'}`}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-slate-100">Spotify</h3>
-              <p className="mt-1 text-xs text-slate-300">
-                {spotifyAuth?.status === 'authenticated'
-                  ? 'Spotify está conectado. Puedes cargar playlists privadas.'
-                  : spotifyAuth?.status === 'authenticating'
-                    ? 'Completa la autorización en la ventana del navegador…'
-                    : spotifyAuth?.status === 'not_configured'
-                      ? 'Guarda primero Client ID y Client Secret.'
-                      : 'Spotify necesita autorización para leer tus playlists.'}
-              </p>
-              {spotifyAuth?.error && <p className="mt-2 text-xs text-red-200">{spotifyAuth.error}</p>}
-            </div>
-            <span className="rounded-full border border-slate-500 px-2.5 py-1 text-[11px] text-slate-200">
-              {spotifyAuth?.status === 'authenticated' ? 'conectado' : spotifyAuth?.status === 'authenticating' ? 'autorizando…' : 'no conectado'}
-            </span>
-            <button
-              type="button"
-              onClick={onStartSpotifyAuth}
-              disabled={spotifyAuth?.status === 'authenticating' || !config.spotify_client_id || !config.spotify_client_secret_configured}
-              className="rounded bg-[#FFFFFF] px-3 py-1.5 text-xs font-medium text-[#161822] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {spotifyAuth?.status === 'authenticated' ? 'reautorizar Spotify' : 'conectar Spotify'}
-            </button>
-          </div>
-        </div>
-      </div>
       <form
         className="grid grid-cols-1 gap-5 border-t border-slate-600 p-5 sm:grid-cols-2"
         onSubmit={(event) => {
@@ -128,6 +98,17 @@ export default function SettingsPanel({ config, onChange, onSave, saving, spotif
             placeholder="C:\\...\\slskd.exe"
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
+        </label>
+        <label className="text-sm font-medium text-slate-200">
+          Descargas simultáneas
+          <select
+            value={config.download_concurrency || 4}
+            onChange={(event) => update('download_concurrency', Number(event.target.value))}
+            className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
+          >
+            {[1, 2, 4, 6, 8].map((value) => <option key={value} value={value}>{value} descarga(s)</option>)}
+          </select>
+          <span className="mt-1 block text-xs font-normal text-[#8D93A6]">Limita las transferencias que inicia esta aplicación; slskd puede mantener otras en cola.</span>
         </label>
         <label className="text-sm font-medium text-slate-200 sm:col-span-2">
           Carpeta de descargas

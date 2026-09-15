@@ -2,9 +2,11 @@ import { requestJson, request } from '../api/client'
 import { getSpotifyTrackId } from './spotify'
 
 const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
+let searchCacheSaveQueue = Promise.resolve()
 
 const PICK_MODES = ['quality', 'speed', 'longest', 'balanced']
 const FORMAT_PREFS = ['any', 'flac', 'mp3', 'ogg', 'm4a']
+const FORMAT_FILTERS = ['mp3', 'wav', 'aiff', 'flac']
 
 // ---- history ---------------------------------------------------------------
 export function getHistoryLabel(url, index) {
@@ -59,21 +61,25 @@ export async function clearHistory() {
 export async function loadSearchPreferences() {
   try {
     const saved = await requestJson('/api/storage/search-preferences')
+    const formatFilters = Array.isArray(saved?.formatFilters)
+      ? saved.formatFilters.filter((format) => FORMAT_FILTERS.includes(format))
+      : FORMAT_FILTERS
     return {
       pickMode: PICK_MODES.includes(saved?.pickMode) ? saved.pickMode : 'quality',
       formatPref: FORMAT_PREFS.includes(saved?.formatPref) ? saved.formatPref : 'any',
+      formatFilters: formatFilters.length > 0 ? formatFilters : FORMAT_FILTERS,
     }
   } catch {
-    return { pickMode: 'quality', formatPref: 'any' }
+    return { pickMode: 'quality', formatPref: 'any', formatFilters: FORMAT_FILTERS }
   }
 }
 
-export async function saveSearchPreferences(pickMode, formatPref) {
+export async function saveSearchPreferences(pickMode, formatPref, formatFilters) {
   try {
     await request('/api/storage/search-preferences', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pickMode, formatPref }),
+      body: JSON.stringify({ pickMode, formatPref, formatFilters }),
     })
   } catch {}
 }
@@ -150,24 +156,32 @@ export async function loadSearchCache(url, tracks) {
 
 export async function saveSearchCache(url, searches) {
   if (!url) return
-  try {
-    const TERMINAL = new Set(['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'])
-    const cacheable = searches
-      .filter((search) => search.raw && TERMINAL.has(String(search.status || search.raw?.status || '').toLowerCase()))
-      .map((search) => ({
-        ...search,
+  const TERMINAL = new Set(['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'])
+  const cacheable = searches
+    .filter((search) => {
+      if (!search.raw) return false
+      const status = String(search.status || search.raw?.status || '').toLowerCase()
+      const hasResults = Array.isArray(search.raw.results) && search.raw.results.length > 0
+      return hasResults || TERMINAL.has(status)
+    })
+    .map((search) => ({
+      ...search,
+      status: 'completed',
+      raw: {
+        ...search.raw,
         status: 'completed',
-        raw: {
-          ...search.raw,
-          status: 'completed',
-          state: 'completed',
-          results: Array.isArray(search.raw.results) ? search.raw.results.slice(0, 100) : [],
-        },
-      }))
-    await request('/api/storage/search-cache', {
+        state: 'completed',
+        results: Array.isArray(search.raw.results) ? search.raw.results.slice(0, 100) : [],
+      },
+    }))
+
+  searchCacheSaveQueue = searchCacheSaveQueue
+    .catch(() => {})
+    .then(() => request('/api/storage/search-cache', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ playlist_url: url, searches: cacheable }),
-    })
-  } catch {}
+    }))
+    .catch(() => {})
+  await searchCacheSaveQueue
 }

@@ -19,6 +19,17 @@ export default function LibraryTree({
   storedFileStreamUrl,
   onDeleteFile,
   coverByPath,
+  coverSourceByPath,
+  onEmbedCover,
+  onSearchCover,
+  onRenameFile,
+  onRevealFile,
+  bpmByPath,
+  onSyncBpm,
+  onUpdateBpm,
+  metadataByPath,
+  onUpdateMetadata,
+  onSearchMetadata,
 }) {
   const folders = Object.entries(node.folders).sort(([a], [b]) => a.localeCompare(b))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
@@ -91,13 +102,23 @@ export default function LibraryTree({
                 storedFileStreamUrl={storedFileStreamUrl}
                 onDeleteFile={onDeleteFile}
                 coverByPath={coverByPath}
+                coverSourceByPath={coverSourceByPath}
+                onEmbedCover={onEmbedCover}
+                onSearchCover={onSearchCover}
+                onRenameFile={onRenameFile}
+                bpmByPath={bpmByPath}
+                onSyncBpm={onSyncBpm}
+                onUpdateBpm={onUpdateBpm}
+                metadataByPath={metadataByPath}
+                onUpdateMetadata={onUpdateMetadata}
+                onSearchMetadata={onSearchMetadata}
               />
             </div>
           </details>
         )
       })}
       {files.length > 0 && (
-        <div className="max-h-[150px] space-y-3 overflow-y-auto pr-1">
+        <div className="min-h-[240px] max-h-[calc(100dvh-18rem)] space-y-3 overflow-y-auto pr-1">
           {files.map((file) => (
             isPlayableFile(file) ? (
               <LibraryAudioCard
@@ -105,6 +126,16 @@ export default function LibraryTree({
                 file={file}
                 streamUrl={storedFileStreamUrl('downloads', file.path)}
                 coverUrl={coverByPath?.[file.path] || ''}
+                coverSourceUrl={coverSourceByPath?.[file.path] || ''}
+                onEmbedCover={onEmbedCover}
+                onSearchCover={onSearchCover}
+                onRenameFile={onRenameFile}
+                onRevealFile={onRevealFile}
+                bpm={bpmByPath?.[file.path] || null}
+                onSyncBpm={onSyncBpm}
+                onUpdateBpm={onUpdateBpm}
+                metadata={metadataByPath?.[file.path] || {}}
+                onUpdateMetadata={onUpdateMetadata}
                 formatSize={formatSize}
                 dragDir="downloads"
                 onDelete={(path) => {

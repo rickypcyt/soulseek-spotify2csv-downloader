@@ -44,7 +44,20 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
                 artists TEXT NOT NULL,
                 path TEXT NOT NULL,
                 cover_url TEXT NOT NULL DEFAULT '',
+                bpm REAL,
                 downloaded_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS downloads (
+                download_id TEXT PRIMARY KEY,
+                playlist_key TEXT NOT NULL DEFAULT '',
+                track_key TEXT NOT NULL,
+                username TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                size INTEGER NOT NULL DEFAULT 0,
+                path TEXT,
+                state TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                completed_at TEXT
             );
             CREATE TABLE IF NOT EXISTS playlist_track_status (
                 playlist_key TEXT NOT NULL,
@@ -84,6 +97,7 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
                 id INTEGER PRIMARY KEY CHECK(id = 1),
                 pick_mode TEXT NOT NULL,
                 format_pref TEXT NOT NULL,
+                format_filters TEXT NOT NULL DEFAULT '["mp3", "wav", "aiff", "flac"]',
                 updated_at TEXT NOT NULL
             );
             """
@@ -96,6 +110,14 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
         # Migración: añadir columna 'cover_url' si no existe (DBs existentes)
         try:
             connection.execute("ALTER TABLE library_tracks ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+        try:
+            connection.execute("ALTER TABLE library_tracks ADD COLUMN bpm REAL")
+        except sqlite3.OperationalError:
+            pass  # La columna ya existe
+        try:
+            connection.execute("ALTER TABLE search_preferences ADD COLUMN format_filters TEXT NOT NULL DEFAULT '[\"mp3\", \"wav\", \"aiff\", \"flac\"]'")
         except sqlite3.OperationalError:
             pass  # La columna ya existe
         migrated = connection.execute(
@@ -178,10 +200,12 @@ def get_library_index(db_path: Path = DB_PATH) -> dict[str, dict[str, str]]:
         rows = connection.execute("SELECT * FROM library_tracks").fetchall()
     return {
         row["track_key"]: {
+            "track_key": row["track_key"],
             "track_name": row["track_name"],
             "artists": row["artists"],
             "path": row["path"],
             "cover_url": row["cover_url"],
+            "bpm": row["bpm"],
         }
         for row in rows
     }
@@ -198,6 +222,24 @@ def get_playlist_track_statuses(playlist_key: str, db_path: Path = DB_PATH) -> d
         row["track_key"]: {"downloaded": bool(row["downloaded"]), "ignored": bool(row["ignored"])}
         for row in rows
     }
+
+
+def update_library_metadata_by_path(path: str, track_name: str, artists: str, db_path: Path = DB_PATH) -> None:
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "UPDATE library_tracks SET track_name = ?, artists = ?, downloaded_at = ? WHERE path = ?",
+            (str(track_name), str(artists), _now(), str(path)),
+        )
+
+
+def update_library_bpm(track_key: str, bpm: float, db_path: Path = DB_PATH) -> None:
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "UPDATE library_tracks SET bpm = ?, downloaded_at = ? WHERE track_key = ?",
+            (float(bpm), _now(), str(track_key)),
+        )
 
 
 def set_playlist_track_status(playlist_key: str, track_key: str, downloaded: bool, ignored: bool | None = None, db_path: Path = DB_PATH) -> None:
@@ -232,6 +274,37 @@ def register_library_track(track_key: str, track_name: str, artists: str, path: 
             "INSERT INTO library_tracks(track_key, track_name, artists, path, cover_url, downloaded_at) VALUES (?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(track_key) DO UPDATE SET track_name=excluded.track_name, artists=excluded.artists, path=excluded.path, cover_url=excluded.cover_url, downloaded_at=excluded.downloaded_at",
             (str(track_key), str(track_name or ""), str(artists or ""), str(path), str(cover_url or ""), _now()),
+        )
+
+
+def register_download(
+    download_id: str,
+    playlist_key: str,
+    track_key: str,
+    username: str,
+    filename: str,
+    size: int,
+    db_path: Path = DB_PATH,
+) -> None:
+    if not download_id or not track_key:
+        return
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO downloads(download_id, playlist_key, track_key, username, filename, size, state, started_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (download_id, playlist_key or "", track_key, username, filename, int(size or 0), "queued", _now()),
+        )
+
+
+def complete_download(download_id: str, path: str, state: str = "completed", db_path: Path = DB_PATH) -> None:
+    if not download_id:
+        return
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "UPDATE downloads SET path = ?, state = ?, completed_at = ? WHERE download_id = ?",
+            (path, state, _now(), download_id),
         )
 
 
@@ -403,20 +476,37 @@ def set_output_folder_pref(playlist_url: str, folder_name: str, db_path: Path = 
 
 
 # ---- search preferences ----------------------------------------------------
-def load_search_prefs(db_path: Path = DB_PATH) -> dict[str, str]:
+DEFAULT_FORMAT_FILTERS = ["mp3", "wav", "aiff", "flac"]
+
+
+def load_search_prefs(db_path: Path = DB_PATH) -> dict[str, Any]:
     initialize_database(db_path=db_path)
     with _connect(db_path) as connection:
-        row = connection.execute("SELECT pick_mode, format_pref FROM search_preferences WHERE id = 1").fetchone()
+        row = connection.execute("SELECT pick_mode, format_pref, format_filters FROM search_preferences WHERE id = 1").fetchone()
     if not row:
-        return {"pickMode": "quality", "formatPref": "any"}
-    return {"pickMode": row["pick_mode"], "formatPref": row["format_pref"]}
+        return {"pickMode": "quality", "formatPref": "any", "formatFilters": DEFAULT_FORMAT_FILTERS}
+    try:
+        format_filters = json.loads(row["format_filters"] or "[]")
+    except (TypeError, json.JSONDecodeError):
+        format_filters = DEFAULT_FORMAT_FILTERS
+    return {
+        "pickMode": row["pick_mode"],
+        "formatPref": row["format_pref"],
+        "formatFilters": format_filters,
+    }
 
 
-def save_search_prefs(pick_mode: str, format_pref: str, db_path: Path = DB_PATH) -> None:
+def save_search_prefs(
+    pick_mode: str,
+    format_pref: str,
+    format_filters: list[str] | None = None,
+    db_path: Path = DB_PATH,
+) -> None:
     initialize_database(db_path=db_path)
+    filters = format_filters if format_filters is not None else DEFAULT_FORMAT_FILTERS
     with _connect(db_path) as connection:
         connection.execute(
-            "INSERT INTO search_preferences(id, pick_mode, format_pref, updated_at) VALUES (1, ?, ?, ?) "
-            "ON CONFLICT(id) DO UPDATE SET pick_mode=excluded.pick_mode, format_pref=excluded.format_pref, updated_at=excluded.updated_at",
-            (pick_mode, format_pref, _now()),
+            "INSERT INTO search_preferences(id, pick_mode, format_pref, format_filters, updated_at) VALUES (1, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET pick_mode=excluded.pick_mode, format_pref=excluded.format_pref, format_filters=excluded.format_filters, updated_at=excluded.updated_at",
+            (pick_mode, format_pref, json.dumps(filters), _now()),
         )

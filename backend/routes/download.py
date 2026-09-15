@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import csv
 import os
+import uuid
 from typing import TYPE_CHECKING
 
 from flask import Blueprint, abort, jsonify, request, send_file
+
+from backend.database import register_download
 
 if TYPE_CHECKING:
     from backend.runtime import RuntimeState
@@ -22,17 +25,22 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         filename = data.get("filename", "").strip()
         size = data.get("size", 0)
         folder_name = str(data.get("folder_name", "")).strip()
+        playlist_key = str(data.get("playlist_key", "")).strip()
         track_key = str(data.get("track_key", "")).strip()
         track_name = str(data.get("track_name", "")).strip()
         artists = str(data.get("artists", "")).strip()
         cover_url = str(data.get("cover_url", "")).strip()
         if not username or not filename:
             return jsonify({"error": "falta username o filename"}), 400
+        download_id = str(uuid.uuid4())
         body, status = state.slskd.enqueue_transfer(username, filename, size, label="download")
         if status == 200 and body.get("ok"):
             download_key = (username, filename)
+            register_download(download_id, playlist_key, track_key, username, filename, size)
             state.slskd.pending_folders[download_key] = folder_name
             state.slskd.pending_metadata[download_key] = {
+                "download_id": download_id,
+                "playlist_key": playlist_key,
                 "track_key": track_key,
                 "track_name": track_name,
                 "artists": artists,

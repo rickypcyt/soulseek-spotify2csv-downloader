@@ -1,675 +1,426 @@
 # Spotify → Soulseek
 
-Aplicación local para convertir playlists de Spotify en búsquedas de Soulseek y descargar las canciones que elijas.
+Aplicación web local para convertir una fuente de Spotify en búsquedas de Soulseek, revisar resultados y administrar una biblioteca de audio descargada.
 
-La aplicación se ejecuta completamente en tu equipo:
+El proyecto está diseñado para ejecutarse en el equipo del usuario. El backend, la interfaz, la base de datos, `slskd` y los archivos descargados permanecen bajo control local.
 
-- Spotify se usa para leer playlists y obtener sus canciones.
-- `slskd` busca y descarga archivos desde Soulseek.
-- Flask proporciona la API local.
-- React proporciona la interfaz web.
-- Las descargas permanecen en tu ordenador.
+> La aplicación no está afiliada a Spotify ni a Soulseek. Descarga y conserva únicamente contenido que tengas derecho a utilizar.
 
-> Estado actual: aplicación local para Windows con configuración preparada para usar `keyring` en Windows, macOS y Linux. El proveedor Soulseek utilizado es `slskd`.
+## Por qué existe
 
-## Empezando desde cero
+El objetivo del proyecto es resolver un flujo concreto:
 
-Si nunca has instalado nada de esto en tu equipo, sigue estos pasos en orden. Al terminar tendrás la aplicación funcionando en tu navegador.
+1. Partir de una playlist, álbum, artista o canción de Spotify.
+2. Convertir sus metadatos en consultas de búsqueda.
+3. Buscar esas consultas en Soulseek mediante `slskd`.
+4. Revisar manualmente los resultados antes de descargar.
+5. Guardar, organizar y reproducir los archivos desde una biblioteca local.
 
-### 1. Instalar Python 3.13
+La aplicación separa la función de Spotify —metadatos, playlists y portadas opcionales— de la función de Soulseek —búsqueda y transferencia de archivos—. La decisión final de qué archivo descargar queda en manos del usuario.
 
-Descárgalo desde la página oficial:
+## Stack técnico
 
-```text
-https://www.python.org/downloads/
-```
+### Backend
 
-Durante la instalación en Windows, marca la casilla **"Add Python to PATH"** antes de pulsar Install. Sin esa casilla los comandos `py` y `python` no funcionarán.
+- Python 3.13.
+- Flask 3: API HTTP local y servidor de archivos estáticos del frontend.
+- `requests`: comunicación con la API HTTP de `slskd` y descargas controladas de imágenes.
+- Spotipy: acceso a la Web API de Spotify y flujo OAuth.
+- `keyring`: almacenamiento de secretos fuera de archivos de texto siempre que el sistema lo permita.
+- Mutagen: lectura y escritura de artwork embebido en MP3, FLAC, M4A/MP4 y OGG/Opus.
+- SQLite: persistencia local de preferencias, estados, biblioteca, historial y caché.
 
-Para comprobar que quedó bien, abre una terminal (ver el paso 4) y ejecuta:
+### Frontend
 
-```powershell
-py -3.13 --version
-```
+- React 19.
+- Vite 8.
+- Tailwind CSS 3.
+- `lucide-react`: iconos de la interfaz.
+- `react-toastify`: notificaciones de estado.
+- Oxlint: validación del código JavaScript/JSX.
 
-Debe responder algo como `Python 3.13.x`. Si responde con un error, vuelve a instalar marcando la casilla de PATH.
+### Servicios externos/locales
 
-### 2. Instalar Node.js LTS
+- Spotify Web API: lectura de metadatos y playlists autorizadas.
+- Soulseek: red de búsqueda y transferencia.
+- [`slskd`](https://github.com/slskd/slskd): daemon/API local que conecta la aplicación con Soulseek.
 
-Descárgalo desde la página oficial:
-
-```text
-https://nodejs.org/
-```
-
-Elige la versión LTS (verde). La instalación incluye `npm`, que la aplicación necesita.
-
-Compruébalo con:
-
-```powershell
-node --version
-npm --version
-```
-
-Ambos deben responder con un número de versión.
-
-### 3. Conseguir el código del proyecto
-
-Si usas Git:
-
-```powershell
-git clone <URL_DEL_REPOSITORIO> soulseek
-cd soulseek
-```
-
-Si no tienes Git, descarga el proyecto como ZIP desde la página del repositorio (botón **Code → Download ZIP**), descomprímelo en una carpeta y abre esa carpeta.
-
-El resto de esta guía asume que estás dentro de la carpeta raíz del proyecto (la que contiene `run.ps1`).
-
-### 4. Abrir PowerShell en la carpeta del proyecto
-
-La forma más sencilla en Windows 11:
-
-1. Abre la carpeta del proyecto en el Explorador de archivos.
-2. Botón derecho sobre el fondo (sin seleccionar ningún archivo).
-3. Elige **Open in Terminal** o **Abrir en Terminal**.
-
-Si no aparece esa opción, abre PowerShell desde el menú Inicio y luego navega a la carpeta:
-
-```powershell
-cd "RUTA\A\la\carpeta\soulseek"
-```
-
-Cambia `RUTA\A\la\carpeta\soulseek` por la ruta real donde descomprimiste o clonaste el proyecto.
-
-### 5. Crear una aplicación en Spotify Developer
-
-Esta aplicación necesita credenciales de Spotify para leer tus playlists. Son gratuitas pero tienes que crearlas una vez.
-
-1. Entra en https://developer.spotify.com/dashboard y inicia sesión con tu cuenta de Spotify.
-2. Pulsa **Create app**.
-3. Rellena el nombre y la descripción con lo que quieras (por ejemplo, "Soulseek local").
-4. En **Redirect URI** pega exactamente:
-
-   ```text
-   http://127.0.0.1:8080/callback
-   ```
-
-5. Acepta los términos y crea la aplicación.
-6. En la página de la app, abre **Settings** y copia el **Client ID** y el **Client Secret**.
-7. Guárdalos para el paso 7.
-
-Más detalles en la guía oficial:
+## Arquitectura
 
 ```text
-https://developer.spotify.com/documentation/web-api/concepts/apps
+┌──────────────────────┐
+│ Navegador             │
+│ React + Vite build    │
+└──────────┬───────────┘
+           │ HTTP /api/*
+           ▼
+┌──────────────────────┐
+│ Flask                 │
+│ backend/app.py        │
+│ blueprints + runtime  │
+└──────┬───────┬───────┘
+       │       │
+       │       ├── SQLite / keyring / filesystem
+       │       │
+       │       └── Spotify Web API
+       │
+       ▼
+┌──────────────────────┐
+│ slskd                 │
+│ API local :5030       │
+└──────────┬───────────┘
+           ▼
+      Red Soulseek
 ```
 
-### 6. Tener una cuenta de Soulseek
+Flask sirve el build de `frontend/dist` y registra los blueprints de la API. El estado compartido de la aplicación se agrupa en `RuntimeState`, que compone el cliente de `slskd`, la configuración local, el servicio de Spotify, el logger y el servicio de biblioteca.
 
-Si no tienes cuenta, crea una en:
+## Requisitos
+
+- Windows 10/11.
+- Python 3.13 con el launcher `py` disponible.
+- Node.js LTS y `npm`.
+- PowerShell.
+- Cuenta de Spotify Developer si se van a cargar playlists privadas o datos que requieran autorización.
+- Cuenta de Soulseek para realizar búsquedas y descargas.
+
+## Instalación y primer arranque
+
+### 1. Obtener el proyecto
+
+```powershell
+git clone https://github.com/rickypcyt/soulseek-spotify2csv-downloader.git
+cd soulseek-spotify2csv-downloader
+```
+
+También se puede descargar el repositorio como ZIP.
+
+### 2. Configurar Spotify Developer
+
+Crear una aplicación en:
+
+<https://developer.spotify.com/dashboard>
+
+Registrar esta Redirect URI:
 
 ```text
-https://www.slsknet.org/
+http://127.0.0.1:8080/callback
 ```
 
-La aplicación usa estas credenciales para conectarse a la red Soulseek mediante `slskd`.
+Guardar el Client ID y el Client Secret. Se introducen después desde la interfaz; no deben escribirse en el repositorio ni en el README.
 
-### 7. Arrancar la aplicación
-
-En la terminal que abriste en el paso 4, ejecuta:
+### 3. Ejecutar el setup
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\run.ps1
+.\setup.ps1
 ```
 
-La primera vez `run.ps1` comprueba si falta algo y, si hace falta, ejecuta `setup.ps1` automáticamente para:
+`setup.ps1` realiza estas tareas:
 
-- Instalar las dependencias de Python.
-- Instalar las dependencias del frontend (`frontend/node_modules`).
-- Descargar la versión fijada de `slskd.exe`.
-- Preparar la configuración local de `slskd`.
+- Instala las dependencias Python de `requirements.txt`.
+- Instala las dependencias frontend mediante `npm install`.
+- Descarga y prepara la versión fijada de `slskd`.
+- Crea o actualiza `vendor/` y la configuración local.
+- Conserva la configuración existente cuando es posible.
 
-En arranques posteriores no reinstala nada si ya está todo listo.
-
-Para una reinstalación forzada:
+Para reinstalar forzadamente las dependencias y el binario:
 
 ```powershell
 .\setup.ps1 -Force
 ```
 
-Cuando termine, abre el navegador en:
+### 4. Arrancar la aplicación
+
+```powershell
+.\run.ps1
+```
+
+`run.ps1` comprueba si existen `node_modules`, las dependencias Python y el ejecutable configurado de `slskd`. Si falta algún componente, ejecuta el setup automáticamente. Después:
+
+1. Compila React con `npm run build`.
+2. Inicia el backend con `python -m backend.spotify_web`.
+3. Inicia `slskd` desde la configuración local.
+4. Sirve la aplicación en:
 
 ```text
 http://127.0.0.1:5000/
 ```
 
-Para detener la aplicación, vuelve a la terminal y pulsa `Ctrl+C`.
+### 5. Configuración desde Settings
 
-### 8. Configurar Spotify y Soulseek en la interfaz
-
-La primera vez que abras la aplicación ve a la página **Settings** (enlace en la parte superior) y completa:
-
-- **Spotify Client ID** y **Spotify Client Secret** que copiaste en el paso 5.
-- **Redirect URI**, que debe ser:
-
-  ```text
-  http://127.0.0.1:8080/callback
-  ```
-
-- **Usuario** y **contraseña** de Soulseek (paso 6).
-- **Carpeta de descargas** donde quieres que se guarden las canciones.
-
-Después pulsa **conectar Spotify**. Se abrirá el navegador para autorizar la aplicación y Spotify volverá a la Redirect URI anterior.
-
-Ya está todo listo. Ve a la página **Principal** y pega una URL de playlist de Spotify para empezar.
-
-## Índice
-
-- [Empezando desde cero](#empezando-desde-cero)
-- [Qué puedes hacer](#qué-puedes-hacer)
-- [Configuración desde la interfaz](#configuración-desde-la-interfaz)
-- [Autenticación de Spotify](#autenticación-de-spotify)
-- [Uso diario](#uso-diario)
-- [Páginas de la aplicación](#páginas-de-la-aplicación)
-- [Biblioteca y previews](#biblioteca-y-previews)
-- [Persistencia](#persistencia)
-- [Puertos utilizados](#puertos-utilizados)
-- [Solución de problemas](#solución-de-problemas)
-- [Desarrollo y verificaciones](#desarrollo-y-verificaciones)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Seguridad y privacidad](#seguridad-y-privacidad)
-- [FAQ](#faq)
-
-## Qué puedes hacer
-
-- Cargar playlists, álbumes, artistas o canciones de Spotify.
-- Buscar texto plano directamente en Soulseek sin usar un enlace de Spotify.
-- Seleccionar una playlist del usuario autenticado desde la interfaz.
-- Buscar varias canciones en Soulseek de forma controlada.
-- Revisar resultados por nombre, formato, tamaño, bitrate y velocidad.
-- Escuchar previews de hasta 30 segundos.
-- Descargar un resultado individual o varias pistas seleccionadas.
-- Elegir el criterio de recomendación: calidad, velocidad, duración o balance.
-- Elegir un formato preferido: cualquier formato, FLAC, MP3, OGG o M4A.
-- Ver siempre primero el resultado recomendado según las preferencias elegidas.
-- Guardar las descargas en una carpeta con el nombre de la playlist.
-- Ver y reproducir la Biblioteca local.
-- Mover previews temporales a la Biblioteca local.
-- Arrastrar canciones entre carpetas/playlists de la Biblioteca.
-- Arrastrar previews desde `temp` a una carpeta de la Biblioteca.
-- Crear nuevas carpetas de playlists inline desde la Biblioteca.
-- Descargar o borrar archivos de la Biblioteca y de `temp`.
-- Consultar logs, transferencias y estado de los servicios.
-- Mantener resultados de búsqueda, preferencias y canciones descargadas entre sesiones.
-
-## Configuración desde la interfaz
-
-La configuración se realiza desde la página **Settings**. No es necesario editar `.env`, `.env.local`, `web_config.json` ni `slskd.yml` manualmente.
-
-### Spotify
-
-En Settings completa:
+La primera vez, abrir **Settings** y completar:
 
 - Spotify Client ID.
 - Spotify Client Secret.
-- Redirect URI, que debe ser:
-
-```text
-http://127.0.0.1:8080/callback
-```
-
-### Soulseek
-
-Completa:
-
+- Redirect URI.
 - Usuario de Soulseek.
 - Contraseña de Soulseek.
-- Ruta de `slskd.exe`, si el setup no la detectó automáticamente.
-- Carpeta de descargas.
+- Ruta de `slskd.exe`, si no fue detectada automáticamente.
+- Carpeta local de descargas.
 
-La URL de `slskd` es local y predeterminada:
+La URL interna habitual de `slskd` es:
 
 ```text
 http://127.0.0.1:5030
 ```
 
-Por eso no es necesario configurarla manualmente para el uso normal.
+La API key de `slskd` se genera y administra internamente. No es necesario editar manualmente `slskd.yml` para el uso normal.
 
-### API key de slskd
+## Workflow técnico
 
-La aplicación genera automáticamente una API key segura cuando inicia `slskd` por primera vez y la guarda en el almacén seguro mediante `keyring`. La clave se pasa internamente al proceso de `slskd`.
+### 1. Carga de fuente
 
-No es necesario copiarla manualmente desde `slskd.yml`. El panel Settings solo muestra si está configurada.
+El frontend envía la fuente a:
 
-## Autenticación de Spotify
+```http
+POST /api/preview
+```
 
-En Settings aparece un card de Spotify con el estado:
+El backend distingue entre:
 
-- No configurado.
-- No conectado.
-- Autorizando.
-- Conectado.
+- URL de playlist de Spotify.
+- URL de álbum.
+- URL de artista.
+- URL de canción.
+- Texto libre para buscar directamente en Soulseek.
+
+Para Spotify, el backend ejecuta `backend/spotify_to_csv.py` mediante `backend/spotify_service.py`. El resultado se normaliza como una lista de tracks con:
+
+- Nombre.
+- Artistas.
+- Álbum.
+- Duración.
+- URL de Spotify.
+- Preview de Spotify, si existe.
+- Consulta de Soulseek.
+- URL de portada, si Spotify la proporciona.
+
+### 2. Creación de búsquedas
+
+Cada búsqueda se crea mediante:
+
+```http
+POST /api/search_soulseek
+```
+
+El backend genera un identificador, limita la cantidad de búsquedas simultáneas y llama a:
+
+```http
+POST http://127.0.0.1:5030/api/v0/searches
+```
+
+El frontend consulta periódicamente el estado mediante:
+
+```http
+GET /api/search_soulseek/<search_id>
+```
+
+Las respuestas se normalizan para mostrar usuarios, archivos, tamaños, bitrate, extensión y velocidad.
+
+La aplicación utiliza `isComplete` y los estados terminales de `slskd` para distinguir una búsqueda activa de una búsqueda finalizada. Cuando termina una búsqueda se muestra un toast.
+
+### 3. Filtros y recomendación
+
+Los resultados pasan por `frontend/src/utils/resultPicker.js`, donde se aplican:
+
+- Eliminación de duplicados.
+- Filtros de formato.
+- Coincidencia con la consulta.
+- Preferencia de calidad.
+- Preferencia de velocidad.
+- Duración.
+- Ranking balanceado.
+
+Los formatos visibles configurables son:
+
+- MP3.
+- WAV.
+- AIFF.
+- FLAC.
+
+Las preferencias se guardan en SQLite y se cargan al iniciar la interfaz.
+
+### 4. Preview
+
+Al seleccionar un resultado, la aplicación llama a:
+
+```http
+POST /api/preview_audio
+```
+
+El archivo se solicita a `slskd` y se mantiene temporalmente dentro de la carpeta `temp`.
+
+El estado de la transferencia se consulta mediante:
+
+```http
+GET /api/preview/status
+```
+
+La interfaz distingue entre:
+
+- En cola.
+- Conectando.
+- Descargando.
+- Sin velocidad todavía.
+- Usuario offline.
 - Error.
+- Completado.
 
-Después de guardar Client ID y Client Secret, pulsa **conectar Spotify**. Se abrirá el navegador para autorizar la aplicación y Spotify volverá a:
+Se pueden mantener varios previews activos simultáneamente. Cada preview se identifica por usuario y archivo y tiene su propio polling.
 
-```text
-http://127.0.0.1:8080/callback
+### 5. Guardado en la biblioteca
+
+Al guardar un preview se envía:
+
+```http
+POST /api/preview/save
 ```
 
-Para obtener las credenciales, consulta la guía oficial:
+El backend mueve el archivo desde `downloads/temp` a la carpeta de playlist seleccionada, registra la descarga y actualiza la biblioteca local.
 
-[Spotify Web API - Creating an app](https://developer.spotify.com/documentation/web-api/concepts/apps)
+Antes de moverlo, el frontend libera el elemento `<audio>` para evitar bloqueos de archivos en Windows. El backend también reintenta el movimiento si el sistema tarda en liberar el handle.
 
-Pasos:
+### 6. Artwork
 
-1. Inicia sesión en Spotify Developer.
-2. Crea una aplicación.
-3. Copia el Client ID.
-4. Copia el Client Secret desde Settings de la aplicación.
-5. Añade la Redirect URI anterior.
-6. Guarda las credenciales en el panel Settings.
-7. Pulsa **conectar Spotify**.
+La biblioteca prioriza el artwork embebido dentro del archivo Soulseek. El backend utiliza Mutagen para extraerlo y servirlo mediante:
 
-El token no se expone en la interfaz ni se guarda en archivos JSON.
-
-## Uso diario
-
-1. Ejecuta:
-
-   ```powershell
-   .\run.ps1
-   ```
-
-2. Abre:
-
-   ```text
-   http://127.0.0.1:5000/
-   ```
-
-3. En **Settings**, configura Spotify y Soulseek si es la primera vez.
-4. En **Principal**, pega una URL de Spotify, escribe texto plano para buscar directamente en Soulseek o pulsa **elegir una playlist de Spotify**.
-5. Selecciona una playlist del selector si quieres cargarla desde tu cuenta.
-6. Pulsa **Cargar playlist**.
-7. Edita el nombre de la carpeta de salida si lo deseas.
-8. Espera a que aparezcan las pistas y los resultados de Soulseek.
-9. Escucha una preview o descarga un resultado.
-10. Para descargar varias pistas, selecciónalas y pulsa **descargar seleccionadas**.
-
-### Búsquedas múltiples
-
-Las búsquedas automáticas se procesan en grupos de cuatro para no saturar `slskd`.
-
-El backend también aplica estas protecciones:
-
-- Máximo de 200 caracteres por query.
-- Máximo de 50 búsquedas activas.
-- Limpieza automática de búsquedas abandonadas después de 120 segundos.
-- Validación de los identificadores de búsqueda.
-- El frontend deja de consultar búsquedas terminadas.
-
-## Páginas de la aplicación
-
-La interfaz usa páginas con rutas propias:
-
-```text
-/          → Principal
-/settings  → Settings
-/logs      → Logs
-/library   → Biblioteca y previews
+```http
+GET /api/library/cover?path=...
 ```
 
-Las rutas funcionan con el historial del navegador, por lo que puedes usar atrás, adelante y refrescar una sección concreta.
+También existe una acción explícita para descargar una portada externa y embeberla en el archivo compatible:
 
-### Principal
-
-Contiene la carga de playlists, las preferencias, las búsquedas, los resultados y las descargas.
-
-### Settings
-
-Contiene la configuración local, el card de autenticación Spotify y la guía para obtener credenciales.
-
-### Logs
-
-Muestra los logs del backend y las transferencias activas de `slskd`. El panel ocupa toda la altura disponible y tiene scroll interno.
-
-### Biblioteca y previews
-
-Muestra la Biblioteca local y los previews temporales en dos columnas en escritorio. En móvil se apilan verticalmente.
-
-Ambas listas tienen paginación y muestran hasta 12 archivos por página.
-
-## Biblioteca y previews
-
-Las previews se descargan primero en:
-
-```text
-Soulseek Downloads/temp
+```http
+POST /api/library/cover/embed
 ```
 
-Desde el card de cada preview puedes:
+Los formatos soportados para insertar artwork son MP3, FLAC, M4A/MP4 y OGG/Opus.
 
-- Reproducirlo.
-- Descargarlo a la Biblioteca.
-- Borrarlo.
+## Persistencia local
 
-El botón **descargar** de un preview mueve el archivo a la carpeta de salida de la playlist:
+La base de datos SQLite se encuentra en la raíz del proyecto:
 
 ```text
-Soulseek Downloads/temp/cancion.flac
-        ↓
-Soulseek Downloads/Nombre de playlist/cancion.flac
+soulseek.db
 ```
 
-La Biblioteca local muestra:
+Contiene datos no secretos como:
 
-- Jerarquía de carpetas.
-- Cards compactos por canción.
-- Tipo de archivo.
-- Duración.
-- Tamaño.
-- Reproductor personalizado.
-- Borrado de archivos.
+- Última playlist cargada.
+- Historial de URLs.
+- Caché de búsquedas.
+- Preferencias de ranking y formatos.
+- Preferencias de carpetas de salida.
+- Estado descargado/ignorado de tracks.
+- Índice de biblioteca.
+- Registro de descargas.
+- Logs locales.
 
-Las carpetas `temp` y `.incomplete` no aparecen dentro de la Biblioteca local.
+Las credenciales y secretos se manejan mediante la configuración local y `keyring`. No deben incluirse en commits ni compartirse públicamente.
 
-### Canciones ya descargadas
+## Puertos y procesos
 
-La aplicación identifica canciones descargadas usando:
+| Servicio | Dirección | Función |
+|---|---|---|
+| Flask | `127.0.0.1:5000` | Aplicación web y API local |
+| OAuth local de Spotify | `127.0.0.1:8080` | Callback de autorización |
+| slskd | `127.0.0.1:5030` | API local del daemon Soulseek |
 
-1. El ID de Spotify guardado en la tabla local `library_tracks` de SQLite.
-2. El nombre de la pista comparado con los archivos existentes como compatibilidad para descargas antiguas.
+Por defecto, el servidor Flask escucha únicamente en localhost. Para acceso desde otro dispositivo habría que cambiar deliberadamente el binding, configurar firewall y añadir autenticación/HTTPS.
 
-Si una canción ya está en la Biblioteca, aparece atenuada con el mensaje:
+## Desarrollo
 
-```text
-Already downloaded this song
-```
+### Frontend en modo desarrollo
 
-La marca depende de la Biblioteca local, no de la cuenta de Soulseek.
-
-## Persistencia
-
-La aplicación utiliza una base de datos SQLite local por usuario:
-
-```text
-~/.spotify-soulseek/soulseek.db
-```
-
-En Windows normalmente corresponde a:
-
-```text
-C:\Users\TU_USUARIO\.spotify-soulseek\soulseek.db
-```
-
-Cada usuario del sistema tiene su propia base de datos local. El archivo nunca se sube al repositorio ni se comparte con otros usuarios. Está excluido por `.gitignore` mediante los patrones `*.db`, `*.sqlite` y `*.sqlite3`.
-
-SQLite almacena:
-
-- Configuración pública.
-- Índice de canciones descargadas.
-- Logs del backend.
-- Metadatos de persistencia y migración.
-
-Las contraseñas, API keys, Client Secrets y tokens siguen guardándose en `keyring`, no en SQLite.
-
-### Migración automática
-
-Si existe una instalación anterior con estos archivos:
-
-```text
-web_config.json
-web_library_index.json
-web_logs.json
-```
-
-la aplicación los importa automáticamente a SQLite durante el primer arranque. No se deben borrar manualmente hasta confirmar que la migración terminó correctamente.
-
-### Resultados de búsqueda
-
-Los resultados se mantienen actualmente en la caché local del navegador por playlist y canción.
-
-- Duran hasta 7 días.
-- Se identifican por URL de playlist e ID de Spotify.
-- Se guardan hasta 100 resultados por canción.
-- Al refrescar no es necesario repetir todas las búsquedas.
-- Pulsar **buscar** manualmente actualiza una pista concreta.
-
-### Preferencias
-
-Persisten las preferencias de:
-
-- Calidad.
-- Velocidad.
-- Duración.
-- Balance.
-- Formato preferido.
-
-El recomendado siempre aparece primero según esas preferencias y el segundo resultado es la siguiente mejor opción.
-
-## Puertos utilizados
-
-La aplicación principal funciona en:
-
-```text
-http://127.0.0.1:5000/
-```
-
-`slskd` funciona como servicio interno en:
-
-```text
-http://127.0.0.1:5030
-```
-
-El usuario normalmente solo debe abrir el puerto `5000`. El puerto `5030` lo utiliza el backend para comunicarse con `slskd`.
-
-El callback local de Spotify utiliza:
-
-```text
-http://127.0.0.1:8080/callback
-```
-
-## Solución de problemas
-
-### `run.ps1` termina con error o la página muestra archivos antiguos
-
-Puede haber una instancia anterior ocupando el puerto `5000`. Detén la terminal anterior con `Ctrl+C` y vuelve a ejecutar:
+Desde `frontend/`:
 
 ```powershell
-.\run.ps1
+npm install
+npm run dev
 ```
 
-Si hace falta localizar el proceso:
+Vite utiliza un proxy para `/api` hacia el backend local en `127.0.0.1:5000`.
+
+### Build de producción local
 
 ```powershell
-Get-NetTCPConnection -LocalPort 5000 -State Listen | Select-Object OwningProcess
+cd frontend
+npm run build
 ```
 
-### La API de Spotify responde 404 o 405
+El build se genera en:
 
-Reinicia completamente el backend. Las nuevas rutas de autenticación solo están disponibles después de cargar la versión actual de Flask.
+```text
+frontend/dist/
+```
 
-### `429` al buscar en Soulseek
+### Verificaciones
 
-Significa que hay demasiadas búsquedas activas. El backend limpia automáticamente las búsquedas abandonadas después de 120 segundos. Si acaba de ocurrir tras una versión anterior, reinicia:
+Tests Python:
 
 ```powershell
-Ctrl+C
-.\run.ps1
+py -3.13 -m pytest
 ```
 
-### `spotify/auth/status` responde 404
-
-Normalmente significa que hay un backend antiguo ejecutándose en el puerto `5000`. Detén la instancia anterior y vuelve a arrancar con `run.ps1`.
-
-### `spotify_to_csv.py` no se encuentra
-
-El archivo correcto está en:
-
-```text
-backend/spotify_to_csv.py
-```
-
-La aplicación resuelve automáticamente esa ruta y usa el mismo intérprete de Python que ejecuta el backend.
-
-### `slskd` aparece como pendiente
-
-Comprueba:
-
-1. Que `slskd.exe` exista en la ruta configurada.
-2. Que `slskd` pueda iniciarse.
-3. Que el usuario y contraseña de Soulseek estén guardados desde Settings.
-4. Que el puerto `5030` no esté ocupado por otra instancia.
-5. Que el backend se haya reiniciado después de cambiar la configuración.
-
-### `http://127.0.0.1:5030` no muestra una página
-
-Es normal. `slskd` se ejecuta en modo API/headless. La interfaz que debes abrir es:
-
-```text
-http://127.0.0.1:5000/
-```
-
-### Spotify vuelve a pedir autorización
-
-Comprueba el Redirect URI:
-
-```text
-http://127.0.0.1:8080/callback
-```
-
-Si Spotify informa de autorización correcta, puedes cerrar manualmente la pestaña si el navegador no la cierra automáticamente.
-
-### Una preview sigue en `temp`
-
-Una preview se mantiene en `temp` hasta que pulses **descargar** o **guardar en biblioteca**. Al moverla correctamente desaparecerá de Previews y aparecerá en la Biblioteca local.
-
-## Desarrollo y verificaciones
-
-Para desarrollo con recarga automática:
-
-```powershell
-.\scripts\dev.ps1
-```
-
-La interfaz de desarrollo normalmente está disponible en:
-
-```text
-http://127.0.0.1:5173
-```
-
-Para verificar el proyecto:
+Lint frontend:
 
 ```powershell
 cd frontend
 npm run lint
-npm run build
-cd ..
-
-py -3.13 -m pytest -q
-py -3.13 -m ruff check backend tests
-python -m compileall backend
 ```
 
-Para validar PowerShell:
+Build frontend:
 
 ```powershell
-$tokens = $null
-$errors = $null
-[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\run.ps1), [ref]$tokens, [ref]$errors) | Out-Null
-[System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path .\setup.ps1), [ref]$tokens, [ref]$errors) | Out-Null
-$errors
+npm run build
 ```
 
-## Estructura del proyecto
+La configuración de pytest y Ruff está en `pyproject.toml`.
+
+## Estructura relevante
 
 ```text
-soulseek/
-├── backend/
-│   ├── __init__.py
-│   ├── spotify_web.py       # Aplicación Flask y API
-│   ├── backend_config.py    # Rutas y ajustes del backend
-│   ├── database.py          # SQLite local por usuario
-│   ├── local_config.py      # SQLite público y keyring
-│   ├── spotify_service.py   # Ejecución del conversor
-│   └── spotify_to_csv.py    # Conversión de enlaces de Spotify
-├── frontend/
-│   ├── src/
-│   │   ├── api/             # Cliente HTTP
-│   │   ├── components/      # Settings y componentes visuales
-│   │   ├── utils/            # Ranking de resultados
-│   │   ├── App.jsx           # Interfaz y páginas locales
-│   │   └── index.css         # Estilos globales
-│   ├── public/
-│   ├── package.json
-│   └── vite.config.js
-├── scripts/
-│   └── dev.ps1
-├── tests/
-├── run.ps1
-├── setup.ps1
-├── requirements.txt
-├── pyproject.toml
-└── README.md
+backend/
+├── app.py                 # Factory Flask y registro de blueprints
+├── runtime.py             # Estado compuesto de la aplicación
+├── spotify_web.py         # Entry point del servidor
+├── spotify_service.py     # Ejecución y lectura del conversor Spotify
+├── spotify_to_csv.py      # Obtención y normalización de tracks Spotify
+├── slskd_client.py        # API, proceso, búsquedas y transferencias slskd
+├── database.py             # Persistencia SQLite
+├── local_config.py         # Configuración local y secretos
+├── library_service.py      # Índice y artwork de la biblioteca
+├── fs_utils.py             # Seguridad de paths y operaciones de archivos
+└── routes/                 # Endpoints Flask por dominio
+
+frontend/
+├── src/App.jsx             # Composición principal de la aplicación
+├── src/components/         # UI
+├── src/hooks/              # Estado y polling de dominios
+├── src/api/client.js       # Cliente HTTP local
+├── src/utils/resultPicker.js # Ranking y filtros de resultados
+└── src/utils/storage.js    # Preferencias y caché
+
+tests/                      # Tests Python
+setup.ps1                   # Instalación de dependencias y slskd
+run.ps1                     # Build y arranque local
+soulseek.db                 # Persistencia SQLite local
 ```
 
-Archivos locales o generados que no deben subirse al repositorio:
+## Seguridad y responsabilidad
 
-- Bases de datos SQLite (`*.db`, `*.sqlite`, `*.sqlite3`).
-- `web_config.json`, `web_library_index.json` y `web_logs.json` heredados.
-- `.env`, `.env.local` y `.env.*` heredados.
-- `vendor/`.
-- `.setup-cache/`.
-- `frontend/node_modules/`.
-- `frontend/dist/`.
-- Archivos CSV y temporales.
+- No publicar `web_config.json`, `soulseek.db` ni ningún archivo de secretos.
+- No exponer Flask directamente a Internet.
+- Utilizar HTTPS, VPN o una red privada si se habilita acceso remoto.
+- Mantener la API key de `slskd` protegida.
+- Revisar los permisos de las carpetas de descarga.
+- Descargar únicamente contenido cuyo uso esté permitido.
 
-## Seguridad y privacidad
+## Licencia y atribuciones
 
-- La aplicación escucha únicamente en `127.0.0.1`.
-- Los secretos se guardan en el almacén seguro del sistema mediante `keyring`.
-- Los secretos no se guardan en `localStorage` ni en JSON.
-- La interfaz nunca vuelve a mostrar Client Secrets, contraseñas o API keys.
-- La configuración se introduce desde la interfaz.
-- `run.ps1` ya no carga archivos `.env`.
-- No compartas la base SQLite local, archivos JSON heredados, tokens, API keys ni contraseñas.
-- No publiques los enlaces de callback de Spotify.
-- No expongas `slskd` a Internet sin una arquitectura de seguridad adicional.
+Consulta la licencia del repositorio para las condiciones del proyecto:
 
-## FAQ
+<https://github.com/rickypcyt/soulseek-spotify2csv-downloader>
 
-### ¿Tengo que iniciar `slskd` manualmente?
-
-No. Si `slskd.exe` está configurado, el backend intenta iniciarlo automáticamente. La API key también se genera y configura automáticamente cuando falta.
-
-### ¿Cuál es la URL que debo abrir?
-
-Abre:
-
-```text
-http://127.0.0.1:5000/
-```
-
-El puerto `5030` es interno para `slskd`.
-
-### ¿Puedo seleccionar una playlist desde Spotify?
-
-Sí. Después de autenticar Spotify desde Settings, pulsa **cargar mis playlists** en Principal, selecciona una playlist y luego pulsa **Cargar playlist**.
-
-### ¿Por qué una canción aparece como descargada?
-
-La aplicación la encontró en la Biblioteca local mediante su ID de Spotify o mediante una coincidencia compatible por nombre de archivo.
-
-### ¿Puedo borrar una preview?
-
-Sí. Desde Biblioteca y previews puedes reproducirla, moverla a la Biblioteca, descargarla o borrarla.
-
-### ¿Puedo borrar el historial sin borrar archivos?
-
-Sí. El historial de playlists solo elimina enlaces guardados en el navegador. No borra descargas ni previews.
-
-### ¿Dónde veo los detalles de un error?
-
-La pestaña **Logs** muestra las operaciones del backend y los estados de las transferencias. No compartas logs que puedan contener información sensible.
+La integración con Soulseek se realiza mediante [`slskd`](https://github.com/slskd/slskd), un proyecto independiente.

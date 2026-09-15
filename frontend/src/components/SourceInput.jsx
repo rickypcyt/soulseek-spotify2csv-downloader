@@ -7,8 +7,8 @@ export default function SourceInput({
   onSubmit,
   onLoadSpotifyPlaylists,
   spotifyAuthStatus,
-  outputFolderName,
-  onOutputFolderChange,
+  searchProvider,
+  onSearchProviderChange,
   urlHistory,
   onSelectHistory,
   onClearHistory,
@@ -16,10 +16,20 @@ export default function SourceInput({
   return (
     <section className="mb-8 rounded-xl border border-slate-600 bg-slate-800 p-5 sm:p-6">
       <div className="mb-4">
-        <h2 className="text-lg font-semibold text-slate-100">1. Cargar fuente de búsqueda</h2>
+        <h2 className="text-lg font-semibold text-slate-100">1. Buscar en Soulseek</h2>
         <p className="mt-1 text-sm leading-relaxed text-slate-300">Pega un enlace de Spotify o escribe directamente lo que quieres buscar en Soulseek.</p>
       </div>
       <form onSubmit={onSubmit} className="flex flex-col gap-3 sm:flex-row">
+        <select
+          value={searchProvider}
+          onChange={(event) => onSearchProviderChange(event.target.value)}
+          title="Fuente de búsqueda para texto libre"
+          aria-label="Fuente de búsqueda"
+          className="rounded-md border border-[#2C303D] bg-[#161822] px-3 py-2.5 text-sm text-[#E9EAF0] outline-none focus:border-[#FFFFFF]/60"
+        >
+          <option value="spotify">Spotify Search</option>
+          <option value="soulseek">Soulseek directo</option>
+        </select>
         <div className="relative flex-1">
           <input
             type="text"
@@ -41,7 +51,7 @@ export default function SourceInput({
           disabled={loading}
           className="whitespace-nowrap rounded-md bg-[#FFFFFF] px-5 py-2.5 text-sm font-medium text-[#161822] transition-colors hover:bg-[#f0b25c] disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? 'Cargando playlist…' : 'Cargar playlist'}
+          {loading ? 'Buscando…' : 'Buscar'}
         </button>
       </form>
       <div className="mt-4 rounded-md border border-[#2C303D] bg-[#161822] p-3">
@@ -56,22 +66,6 @@ export default function SourceInput({
         <span className="ml-3 text-xs text-[#8D93A6]">
           {spotifyAuthStatus === 'authenticated' ? 'Abre el selector de playlists' : 'Conecta Spotify desde Settings primero'}
         </span>
-      </div>
-      <div className="mt-4 rounded-md border border-[#2C303D] bg-[#161822] p-3">
-        <label className="block text-sm font-medium text-slate-200" htmlFor="output-folder-name">
-          Destino de las descargas
-        </label>
-        <p className="mt-1 text-xs leading-relaxed text-[#8D93A6]">
-          Se propone automáticamente el nombre de la playlist y puedes modificarlo. Si lo dejas vacío, las descargas se quedan en temporales; los previews solo se guardan en una playlist cuando eliges una carpeta.
-        </p>
-        <input
-          id="output-folder-name"
-          type="text"
-          value={outputFolderName}
-          onChange={(event) => onOutputFolderChange(event.target.value)}
-          placeholder="Vacío = temporales"
-          className="mt-2 w-full rounded-md border border-[#2C303D] bg-[#0D0F16] px-3 py-2 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none focus:border-[#FFFFFF]/60"
-        />
       </div>
       {urlHistory.length > 0 && (
         <div className="mt-5 border-t border-slate-600 pt-5">

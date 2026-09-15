@@ -18,7 +18,6 @@ import { pickBest, rankResults } from './utils/resultPicker'
 import { getSpotifyTrackId, matchesLibraryFile, trackIdentity } from './utils/spotify'
 import {
   getHistoryLabel,
-  getOutputFolderPreference,
   loadHistory,
   loadLastPlaylist,
   loadSearchCache,
@@ -26,7 +25,6 @@ import {
   saveHistory,
   saveLastPlaylist,
   saveSearchPreferences,
-  setOutputFolderPreference,
 } from './utils/storage'
 import { useConfig } from './hooks/useConfig'
 import { useDiagnostics } from './hooks/useDiagnostics'
@@ -43,6 +41,7 @@ function App() {
   const [bootstrapped, setBootstrapped] = useState(false)
   const [initialPlaylist, setInitialPlaylist] = useState({})
   const [url, setUrl] = useState('')
+  const [searchProvider, setSearchProvider] = useState('spotify')
   const [outputFolderName, setOutputFolderName] = useState('')
   const [tracks, setTracks] = useState([])
   const [loading, setLoading] = useState(false)
@@ -57,6 +56,7 @@ function App() {
   const [completedTransfersOpen, setCompletedTransfersOpen] = useState(false)
   const [pickMode, setPickMode] = useState('quality')
   const [formatPref, setFormatPref] = useState('any')
+  const [formatFilters, setFormatFilters] = useState(['mp3', 'wav', 'aiff', 'flac'])
   const [initialSearches, setInitialSearches] = useState([])
   const logRef = useRef(null)
   const downloadSelectedTimers = useRef([])
@@ -71,13 +71,13 @@ function App() {
       if (cancelled) return
       setInitialPlaylist(playlist)
       setUrl(playlist.url || '')
-      const folderPref = playlist.url ? await getOutputFolderPreference(playlist.url) : undefined
       if (cancelled) return
-      setOutputFolderName(folderPref ?? playlist.outputFolderName ?? '')
+      setOutputFolderName('')
       setTracks(playlist.tracks || [])
       setUrlHistory(history)
       setPickMode(prefs.pickMode)
       setFormatPref(prefs.formatPref)
+      setFormatFilters(prefs.formatFilters)
       const cached = await loadSearchCache(playlist.url || '', playlist.tracks || [])
       if (cancelled) return
       setInitialSearches(cached)
@@ -98,7 +98,7 @@ function App() {
   const { navigate, activeTab } = useTabNavigation()
   const { config, setConfig, saveConfig, savingConfig } = useConfig()
   const { diagnostics, fetchDiagnostics } = useDiagnostics()
-  const { libraryIndex } = useLibraryIndex()
+  const { libraryIndex, fetchLibraryIndex } = useLibraryIndex()
   const { logs, backendOnline } = useLogs()
   const { spotifyAuth, startSpotifyAuth } = useSpotifyAuth()
 
@@ -115,18 +115,130 @@ function App() {
   const { downloads, enqueueDownload, cancelTrackDownload, getTrackDownloads, resetDownloads } = useDownloads({
     tracks,
     outputFolderName,
+    playlistKey: url,
+    maxConcurrent: config.download_concurrency,
     fetchDiagnostics,
     collapseTrackResults,
   })
 
   const {
-    activePreview, startPreview, cancelPreview, savePreviewToLibrary, discardActivePreview,
-  } = usePreview({ tracks, outputFolderName, fetchDiagnostics })
+    previews, startPreview, cancelPreview, savePreviewToLibrary, discardActivePreview,
+  } = usePreview({ tracks, outputFolderName, playlistKey: url, fetchDiagnostics })
 
   const {
     newLibraryFolderName, setNewLibraryFolderName, dragOverLibraryFolder, setDragOverLibraryFolder,
-    deleteItem, cleanupAll, cancelTransfer, saveTemporaryPreviewToLibrary, moveLibraryFile, createLibraryFolder,
+    deleteItem, cleanupAll, cancelTransfer, saveTemporaryPreviewToLibrary, moveLibraryFile, renameLibraryFile, createLibraryFolder,
   } = useLibraryOps({ outputFolderName, fetchDiagnostics })
+
+  const embedCoverInFile = useCallback(async (path, coverUrl) => {
+    try {
+      const response = await request('/api/library/cover/embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, cover_url: coverUrl }),
+      })
+      const data = await response.json()
+      if (!response.ok || data.error) throw new Error(data.error || 'No se pudo insertar la portada')
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success('Portada insertada en el archivo')
+    } catch (error) {
+      toast.error(`No se pudo insertar la portada: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
+
+  const embedDownloadCover = useCallback((download, track) => {
+    return embedCoverInFile(download.path, track.cover_url)
+  }, [embedCoverInFile])
+
+  const revealFile = useCallback(async (path, dir = 'downloads') => {
+    try {
+      await requestJson('/api/file/reveal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, dir }),
+      })
+    } catch (error) {
+      toast.error(`No se pudo abrir la carpeta: ${error.message}`)
+    }
+  }, [])
+
+  const searchAndEmbedCover = useCallback(async (path, dir = 'downloads') => {
+    try {
+      const response = await request('/api/library/cover/search-embed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, dir }),
+      })
+      const raw = await response.text()
+      let data = {}
+      try {
+        data = raw ? JSON.parse(raw) : {}
+      } catch {
+        throw new Error('El backend no reconoce esta operación. Reinicia la aplicación con .\\run.ps1.')
+      }
+      if (!response.ok || data.error) throw new Error(data.error || 'No se encontró portada')
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success('Portada encontrada y añadida al archivo')
+    } catch (error) {
+      toast.error(`No se pudo buscar la portada: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
+
+  const syncLibraryBpm = useCallback(async (path) => {
+    try {
+      const data = await requestJson('/api/library/bpm/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success(`BPM ${data.bpm} guardado en el archivo`)
+    } catch (error) {
+      toast.error(`No se pudo guardar el BPM: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
+
+  const updateLibraryBpm = useCallback(async (path, bpm) => {
+    try {
+      const data = await requestJson('/api/library/bpm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, bpm }),
+      })
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success(`BPM ${data.bpm} guardado en el archivo`)
+    } catch (error) {
+      toast.error(`No se pudo guardar el BPM: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
+
+  const searchAndUpdateMetadata = useCallback(async (path) => {
+    try {
+      const data = await requestJson('/api/library/metadata/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success(`Metadata guardada: ${data.track_name}`)
+    } catch (error) {
+      toast.error(`No se pudo buscar metadata: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
+
+  const updateLibraryMetadata = useCallback(async (path, trackName, artists) => {
+    try {
+      const data = await requestJson('/api/library/metadata', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, track_name: trackName, artists }),
+      })
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success(`Metadata actualizada: ${data.track_name}`)
+    } catch (error) {
+      toast.error(`No se pudo actualizar la metadata: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
 
   // ---- effects: playlist persistence & preferences ----
   useEffect(() => {
@@ -139,10 +251,6 @@ function App() {
       saveLastPlaylist({ url, tracks, outputFolderName })
     }
   }, [url, tracks, outputFolderName])
-
-  useEffect(() => {
-    setOutputFolderPreference(url, outputFolderName)
-  }, [url, outputFolderName])
 
   useEffect(() => {
     if (!url) return undefined
@@ -169,16 +277,16 @@ function App() {
   }, [url])
 
   useEffect(() => {
-    saveSearchPreferences(pickMode, formatPref)
-  }, [pickMode, formatPref])
+    if (!bootstrapped) return
+    saveSearchPreferences(pickMode, formatPref, formatFilters)
+  }, [bootstrapped, pickMode, formatPref, formatFilters])
 
   // ---- playlist loading ----
   const loadPlaylist = useCallback(async (sourceUrl) => {
     const targetUrl = (sourceUrl || '').trim()
     if (!targetUrl || loading) return
-    const savedOutputFolder = await getOutputFolderPreference(targetUrl)
     setUrl(targetUrl)
-    setOutputFolderName(savedOutputFolder ?? '')
+    setOutputFolderName('')
     resetSearches()
     resetDownloads()
     setLoading(true)
@@ -188,12 +296,11 @@ function App() {
       const r = await request('/api/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl }),
+        body: JSON.stringify({ url: targetUrl, provider: searchProvider }),
       })
       const data = await r.json()
       if (!r.ok) throw new Error(data.error || 'Error')
       const loaded = data.tracks || []
-      if (savedOutputFolder === undefined) setOutputFolderName(data.playlist_name || '')
       const cachedSearches = await loadSearchCache(targetUrl, loaded)
       setSearches(cachedSearches)
       setTracks(loaded)
@@ -212,7 +319,7 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }, [loading, resetSearches, resetDownloads, setSearches, urlHistory])
+  }, [loading, searchProvider, resetSearches, resetDownloads, setSearches, urlHistory])
 
   const preview = (event) => {
     event.preventDefault()
@@ -258,8 +365,8 @@ function App() {
     downloadSelectedTimers.current = []
     list.forEach((i, n) => {
       const s = getTrackSearch(i)
-      const results = rankResults(s?.raw?.results || [], s?.query, pickMode, formatPref)
-      const best = pickBest(results, pickMode, formatPref)
+      const results = rankResults(s?.raw?.results || [], s?.query, pickMode, formatPref, formatFilters)
+      const best = pickBest(results, pickMode, formatPref, formatFilters)
       if (best) {
         const id = setTimeout(() => enqueueDownload(i, best), n * 400)
         downloadSelectedTimers.current.push(id)
@@ -339,8 +446,7 @@ function App() {
     const saved = urlHistory.find((item) => item.url === selectedUrl)
     if (saved) {
       setUrl(saved.url)
-      const folder = await getOutputFolderPreference(saved.url)
-      setOutputFolderName(folder ?? saved.name)
+      setOutputFolderName('')
     }
   }
 
@@ -363,11 +469,59 @@ function App() {
     [diagnostics]
   )
   const libraryFolders = diagnostics?.download_directories || []
+  const localPlaylists = [...new Set([
+    ...libraryFolders,
+    ...libraryFiles.map((file) => file.path),
+  ].map((path) => String(path).split('/').filter(Boolean)[0]).filter((name) => name && !['temp', '.incomplete'].includes(name.toLowerCase())))].sort((a, b) => a.localeCompare(b))
   const coverByPath = useMemo(() => {
     const map = {}
     if (libraryIndex) {
       for (const entry of Object.values(libraryIndex)) {
         if (entry?.path) map[entry.path] = entry.cover_url || ''
+      }
+    }
+    return map
+  }, [libraryIndex])
+  const coverSourceByPath = useMemo(() => {
+    const map = {}
+    if (libraryIndex) {
+      for (const entry of Object.values(libraryIndex)) {
+        if (entry?.path) map[entry.path] = entry.cover_source_url || ''
+      }
+    }
+    return map
+  }, [libraryIndex])
+  const bpmByPath = useMemo(() => {
+    const map = {}
+    if (libraryIndex) {
+      for (const entry of Object.values(libraryIndex)) {
+        if (entry?.path) map[entry.path] = entry.bpm || null
+      }
+    }
+    return map
+  }, [libraryIndex])
+  const _isSpotifyTrackKey = (trackKey) => typeof trackKey === 'string' && trackKey.length === 22 && !trackKey.includes(':')
+
+  const metadataByPath = useMemo(() => {
+    const map = {}
+    if (libraryIndex) {
+      for (const entry of Object.values(libraryIndex)) {
+        const path = entry?.path
+        if (!path) continue
+        const existing = map[path]
+        if (!existing) {
+          map[path] = { trackName: entry.track_name || '', artists: entry.artists || '', __trackKey: entry.track_key || '' }
+          continue
+        }
+        const existingComplete = existing.trackName.trim() && existing.artists.trim()
+        const currentComplete = (entry.track_name || '').trim() && (entry.artists || '').trim()
+        const existingIsSpotify = _isSpotifyTrackKey(existing.__trackKey)
+        const currentIsSpotify = _isSpotifyTrackKey(entry.track_key)
+        if (currentIsSpotify && !existingIsSpotify) {
+          map[path] = { trackName: entry.track_name || '', artists: entry.artists || '', __trackKey: entry.track_key || '' }
+        } else if (currentComplete && !existingComplete) {
+          map[path] = { trackName: entry.track_name || '', artists: entry.artists || '', __trackKey: entry.track_key || '' }
+        }
       }
     }
     return map
@@ -384,7 +538,7 @@ function App() {
   const activeDownloadCount = downloadEntries.filter((download) => download.state === 'descargando').length
   const pendingDownloadCount = queuedDownloadCount + activeDownloadCount
   const activeSearchCount = searches.filter(
-    (s) => s.searchId && !['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'].includes(String(s.status || '').toLowerCase())
+    (s) => s.searchId && !s.raw?.isComplete && !['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'].includes(String(s.status || '').toLowerCase())
   ).length
   const transfers = diagnostics?.transfers || []
   const activeTransfers = transfers.filter((transfer) => !isCompletedTransfer(transfer))
@@ -415,8 +569,8 @@ function App() {
               onSubmit={preview}
               onLoadSpotifyPlaylists={loadSpotifyPlaylists}
               spotifyAuthStatus={spotifyAuth.status}
-              outputFolderName={outputFolderName}
-              onOutputFolderChange={setOutputFolderName}
+              searchProvider={searchProvider}
+              onSearchProviderChange={setSearchProvider}
               urlHistory={urlHistory}
               onSelectHistory={selectHistory}
               onClearHistory={clearHistory}
@@ -444,6 +598,8 @@ function App() {
             config={config}
             diagnostics={diagnostics}
             backendOnline={backendOnline}
+            spotifyAuth={spotifyAuth}
+            onStartSpotifyAuth={startSpotifyAuth}
           />
         )}
 
@@ -453,8 +609,6 @@ function App() {
             onChange={setConfig}
             onSave={saveConfig}
             saving={savingConfig}
-            spotifyAuth={spotifyAuth}
-            onStartSpotifyAuth={startSpotifyAuth}
             open
           />
         )}
@@ -465,6 +619,8 @@ function App() {
             onPickModeChange={setPickMode}
             formatPref={formatPref}
             onFormatPrefChange={setFormatPref}
+            formatFilters={formatFilters}
+            onFormatFiltersChange={setFormatFilters}
           />
         )}
 
@@ -479,6 +635,8 @@ function App() {
           <div className={`min-w-0 ${activeTab === 'main' ? '' : 'hidden'}`}>
             <TrackList
               tracks={tracks}
+              localPlaylists={localPlaylists}
+              formatFilters={formatFilters}
               loading={loading}
               selected={selected}
               onSelectAll={selectAll}
@@ -503,7 +661,7 @@ function App() {
               onToggleExpandedSearch={toggleExpandedSearch}
               collapsedSearches={collapsedSearches}
               onToggleCollapsedSearch={toggleCollapsedSearch}
-              activePreview={activePreview}
+              previews={previews}
               onStartPreview={startPreview}
               onSavePreview={savePreviewToLibrary}
               onDiscardPreview={discardActivePreview}
@@ -511,6 +669,7 @@ function App() {
               storedFileStreamUrl={storedFileStreamUrl}
               storedFileUrl={storedFileUrl}
               onCancelDownload={cancelTrackDownload}
+              onEmbedCover={embedDownloadCover}
               onRefreshSearch={refreshSearch}
               onCancelSearch={cancelSearch}
             />
@@ -529,6 +688,17 @@ function App() {
                 libraryFiles={libraryFiles}
                 libraryFolders={libraryFolders}
                 coverByPath={coverByPath}
+                coverSourceByPath={coverSourceByPath}
+                onEmbedCover={embedCoverInFile}
+                onSearchCover={searchAndEmbedCover}
+                onRenameFile={renameLibraryFile}
+                onRevealFile={(path) => revealFile(path, 'downloads')}
+                bpmByPath={bpmByPath}
+                onSyncBpm={syncLibraryBpm}
+                onUpdateBpm={updateLibraryBpm}
+                metadataByPath={metadataByPath}
+                onUpdateMetadata={updateLibraryMetadata}
+                onSearchMetadata={searchAndUpdateMetadata}
                 dragOverFolder={dragOverLibraryFolder}
                 onDragOverFolder={setDragOverLibraryFolder}
                 onMoveFile={moveLibraryFile}
@@ -556,6 +726,9 @@ function App() {
                 onPreviewPageChange={setPreviewPage}
                 storedFileStreamUrl={storedFileStreamUrl}
                 onSaveTemporaryPreview={saveTemporaryPreviewToLibrary}
+                localPlaylists={localPlaylists}
+                onSearchCover={(path) => searchAndEmbedCover(path, 'previews')}
+                onRevealFile={(path) => revealFile(path, 'previews')}
                 onDeleteFile={deleteItem}
               />
             </div>
@@ -564,7 +737,7 @@ function App() {
         <AppFooter />
         <ToastContainer
           position="top-left"
-          autoClose={3500}
+          autoClose={6000}
           theme="dark"
           newestOnTop
           closeOnClick

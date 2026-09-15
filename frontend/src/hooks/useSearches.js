@@ -144,7 +144,7 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
       searchPollInFlight.current = true
       const current = searchesRef.current
       const pendingSearches = current.filter(
-        (s) => s.searchId && !TERMINAL_STATUSES.has(String(s.status || '').toLowerCase())
+        (s) => s.searchId && !s.raw?.isComplete && !TERMINAL_STATUSES.has(String(s.status || '').toLowerCase())
       )
       if (pendingSearches.length === 0) {
         searchPollInFlight.current = false
@@ -160,12 +160,18 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
               const r = await request(`/api/search_soulseek/${s.searchId}`)
               const data = await r.json()
               const results = data.results || []
+              const nextStatus = data.isComplete ? 'completed' : data.status || data.state || s.status
+              const wasActive = !s.raw?.isComplete && !TERMINAL_STATUSES.has(String(s.status || '').toLowerCase())
+              const isCompleted = data.isComplete || ['completed', 'complete', 'finished'].includes(String(nextStatus).toLowerCase())
+              if (wasActive && isCompleted) {
+                toast.success(`Búsqueda completada: ${s.query} · ${data.resultsCount ?? results.length} resultado(s)`)
+              }
               updates[s.searchId] = {
                 ...s,
                 raw: data,
                 pollCount: (s.pollCount || 0) + 1,
                 resultsCount: data.resultsCount ?? (Array.isArray(results) ? results.length : 0),
-                status: data.status || data.state || s.status,
+                status: nextStatus,
               }
             } catch {}
           })

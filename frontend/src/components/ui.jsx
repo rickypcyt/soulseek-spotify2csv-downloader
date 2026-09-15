@@ -1,4 +1,5 @@
 import { Check, Minus } from 'lucide-react'
+import { useEffect, useRef } from 'react'
 
 export function StatusDot({ ok }) {
   return (
@@ -13,35 +14,56 @@ export function StatusDot({ ok }) {
   )
 }
 
-export function Checkbox({ checked, indeterminate = false, onChange, title, size = 12 }) {
+export function Checkbox({ checked, indeterminate = false, onChange, title, size = 12, disabled = false }) {
+  const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = indeterminate
+    }
+  }, [indeterminate])
+
+  const isActive = indeterminate || checked
+
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={indeterminate ? 'mixed' : checked}
-      title={title}
-      onClick={(e) => {
-        e.stopPropagation()
-        onChange?.(!checked)
-      }}
-      className={`flex shrink-0 items-center justify-center rounded-[2px] border transition-colors ${indeterminate || checked
-        ? 'border-[#FFFFFF] bg-[#FFFFFF] text-[#161822]'
-        : 'border-[#565C6E] bg-[#0D0F16] text-transparent hover:border-[#8D93A6]'
-      }`}
+    <span
+      className="relative inline-flex shrink-0"
       style={{ height: size, width: size }}
+      title={title}
     >
-      {indeterminate ? (
-        <Minus size={size - 6} strokeWidth={3} />
-      ) : checked ? (
-        <Check size={size - 6} strokeWidth={3.5} />
-      ) : null}
-    </button>
+      <input
+        ref={inputRef}
+        type="checkbox"
+        checked={!!checked}
+        onChange={(e) => onChange?.(e.target.checked)}
+        disabled={disabled}
+        aria-label={title}
+        className="peer absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0 focus:outline-none disabled:cursor-not-allowed"
+      />
+      <span
+        className={`absolute inset-0 z-0 flex items-center justify-center rounded-[2px] border transition-colors ${
+          disabled ? 'opacity-50' : ''
+        } ${
+          isActive
+            ? 'border-[#FFFFFF] bg-[#FFFFFF] text-[#161822]'
+            : 'border-[#565C6E] bg-[#0D0F16] text-transparent peer-hover:border-[#8D93A6]'
+        } peer-focus-visible:ring-2 peer-focus-visible:ring-[#FFFFFF]/50`}
+      >
+        {indeterminate ? (
+          <Minus size={size - 6} strokeWidth={3} />
+        ) : checked ? (
+          <Check size={size - 6} strokeWidth={3.5} />
+        ) : null}
+      </span>
+    </span>
   )
 }
 
 export function Chip({ tone = 'neutral', children }) {
   const tones = {
     neutral: 'bg-[#21242F] text-[#8D93A6] border-[#2C303D]',
+    queued: 'bg-blue-400/10 text-blue-200 border-blue-400/60',
+    active: 'bg-emerald-400/10 text-emerald-200 border-emerald-400/60',
     amber: 'bg-[#FFFFFF]/10 text-[#FFFFFF] border-[#FFFFFF]/30',
     teal: 'bg-[#FFFFFF]/10 text-[#FFFFFF] border-[#FFFFFF]/30',
     coral: 'bg-[#6B7280]/10 text-[#6B7280] border-[#6B7280]/30',

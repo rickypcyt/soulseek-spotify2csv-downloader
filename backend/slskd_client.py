@@ -20,7 +20,9 @@ from urllib.parse import quote
 
 import requests
 
+from backend.database import complete_download, set_playlist_track_status
 from backend.fs_utils import safe_dirname
+from backend.library_service import write_audio_metadata
 
 if TYPE_CHECKING:
     from backend.runtime import RuntimeState
@@ -165,7 +167,10 @@ class SlskdClient:
     def normalize_search(data: dict[str, Any]) -> dict[str, Any]:
         """Convert a slskd search response into the shape the frontend expects."""
         flat = []
-        for resp in data.get("responses", []):
+        responses = data.get("responses", [])
+        if isinstance(responses, dict):
+            responses = responses.get("responses", [])
+        for resp in responses if isinstance(responses, list) else []:
             username = resp.get("username") or resp.get("peer")
             upload_speed = resp.get("uploadSpeed") or resp.get("speed") or 0
             for f in resp.get("files", []):
@@ -183,7 +188,7 @@ class SlskdClient:
         data["results"] = flat
         data["searchId"] = data.get("id")
         data["query"] = data.get("searchText")
-        data["status"] = data.get("state") or data.get("status")
+        data["status"] = "completed" if data.get("isComplete") else data.get("state") or data.get("status")
         data["responseCount"] = data.get("responseCount", 0)
         return data
 
@@ -257,23 +262,29 @@ class SlskdClient:
             state_resp = requests.get(
                 f"{self.url}/api/v0/searches/{search_id}",
                 headers=self.headers(),
+                params={"includeResponses": "true"},
                 timeout=10,
             )
             if not state_resp.ok:
                 self.state.logs.add(f"[slskd] GET state {state_resp.status_code}: searchId={search_id}")
                 return {"error": f"slskd {state_resp.status_code}", "status": "error"}, state_resp.status_code
             data = state_resp.json()
-            # Los resultados reales están en el endpoint /responses
-            try:
-                resp = requests.get(
-                    f"{self.url}/api/v0/searches/{search_id}/responses",
-                    headers=self.headers(),
-                    timeout=10,
-                )
-                if resp.ok:
-                    data["responses"] = resp.json()
-            except Exception as e:
-                self.state.logs.add(f"[slskd] GET responses error: {e}")
+            if not data.get("responses"):
+                try:
+                    resp = requests.get(
+                        f"{self.url}/api/v0/searches/{search_id}/responses",
+                        headers=self.headers(),
+                        timeout=10,
+                    )
+                    if resp.ok:
+                        response_data = resp.json()
+                        data["responses"] = (
+                            response_data.get("responses", [])
+                            if isinstance(response_data, dict)
+                            else response_data
+                        )
+                except Exception as e:
+                    self.state.logs.add(f"[slskd] GET responses error: {e}")
             data = self.normalize_search(data)
             status = str(data.get("status") or data.get("state") or "").lower()
             if status in _TERMINAL_SEARCH_STATES:
@@ -287,9 +298,74 @@ class SlskdClient:
             self.state.logs.add(f"[slskd] Error de conexión: {e}")
             return {"error": f"Error de conexión: {e}", "status": "error"}, 200
 
+    def user_status(self, username: str) -> str:
+        """Return a Soulseek user's presence as Online, Away, Offline or Unknown."""
+        try:
+            response = requests.get(
+                f"{self.url}/api/v0/users/{quote(username, safe='')}/status",
+                headers=self.headers(),
+                timeout=5,
+            )
+            if not response.ok:
+                return "Unknown"
+            data = response.json()
+            presence = data.get("presence") if isinstance(data, dict) else None
+            normalized = str(presence or "").strip().capitalize()
+            return normalized if normalized in {"Online", "Away", "Offline"} else "Unknown"
+        except (requests.RequestException, ValueError):
+            return "Unknown"
+
     # ------------------------------------------------------------------
     # Transfers (downloads / previews / cancel)
     # ------------------------------------------------------------------
+    @staticmethod
+    def classify_transfer_error(response: requests.Response) -> dict[str, str]:
+        """Map slskd transfer errors to stable UI states."""
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+
+        message = ""
+        if isinstance(payload, dict):
+            for key in ("error", "message", "detail", "title"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    message = value.strip()
+                    break
+        if not message:
+            message = response.text.strip()
+
+        normalized = message.lower()
+        if any(phrase in normalized for phrase in (
+            "appears to be offline",
+            "user is offline",
+            "user offline",
+            "peer is offline",
+            "peer offline",
+            "not connected",
+        )):
+            return {
+                "status": "offline",
+                "error": "El usuario de Soulseek está desconectado",
+            }
+
+        if any(phrase in normalized for phrase in (
+            "user not found",
+            "unable to connect to user",
+            "cannot connect to user",
+            "unavailable",
+        )):
+            return {
+                "status": "unavailable",
+                "error": "El usuario de Soulseek no está disponible",
+            }
+
+        return {
+            "status": "error",
+            "error": f"slskd {response.status_code}",
+        }
+
     def enqueue_transfer(
         self, username: str, filename: str, size: int, label: str = "download"
     ) -> tuple[dict[str, Any], int]:
@@ -310,40 +386,41 @@ class SlskdClient:
             return {"error": str(e), "status": "error"}, 200
         self.state.logs.add(f"[slskd] {label} enqueue {response.status_code}: {response.text[:300]}")
         if not response.ok:
-            return {"error": f"slskd {response.status_code}", "status": "error"}, response.status_code
+            return self.classify_transfer_error(response), response.status_code
         return {"ok": True}, 200
 
-    def _find_transfer(self, username: str, filename: str) -> tuple[str, int]:
-        """Return (state, percentComplete) for a transfer, or ("Unknown", 0)."""
+    def _find_transfer(self, username: str, filename: str) -> dict[str, Any]:
+        """Return the current transfer state and progress details."""
         response = requests.get(
             f"{self.url}/api/v0/transfers/downloads/{quote(username, safe='')}",
             headers=self.headers(),
             timeout=10,
         )
         if not response.ok:
-            return "Unknown", 0
+            return {"state": "Unknown", "percentComplete": 0}
         data = response.json()
-        target_state = "Unknown"
-        percent_complete = 0
-        for d in data.get("directories", []):
-            for f in d.get("files", []):
-                if f.get("filename") == filename or (f.get("filename") or "").endswith(filename):
-                    percent_complete = f.get("percentComplete", 0)
-                    target_state = f.get("state") or "Unknown"
+        details: dict[str, Any] = {"state": "Unknown", "percentComplete": 0}
+        for directory in data.get("directories", []):
+            for file_data in directory.get("files", []):
+                if file_data.get("filename") == filename or (file_data.get("filename") or "").endswith(filename):
+                    for key in ("state", "percentComplete", "bytesRemaining", "bytesTransferred", "averageSpeed", "currentSpeed"):
+                        if key in file_data:
+                            details[key] = file_data[key]
                     break
-            if target_state != "Unknown":
+            if details["state"] != "Unknown":
                 break
-        return target_state, percent_complete
+        return details
 
     def preview_status(self, username: str, filename: str) -> dict[str, Any]:
-        target_state, percent_complete = self._find_transfer(username, filename)
+        transfer = self._find_transfer(username, filename)
+        target_state = transfer.get("state", "Unknown")
         base = os.path.basename(filename.replace("\\", "/").replace("/", os.sep))
         matches = glob.glob(os.path.join(self.state.previews_dir, "**", glob.escape(base)), recursive=True)
         if matches:
             latest = max(matches, key=os.path.getmtime)
             rel = os.path.relpath(latest, self.state.previews_dir).replace("\\", "/")
-            return {"state": "Completed", "path": rel, "percentComplete": 100}
-        return {"state": target_state, "percentComplete": percent_complete}
+            return {**transfer, "state": "Completed", "path": rel, "percentComplete": 100}
+        return transfer
 
     def download_status(
         self,
@@ -352,9 +429,10 @@ class SlskdClient:
         requested_folder: str,
         playlist_name: str,
     ) -> dict[str, Any]:
-        target_state, percent_complete = self._find_transfer(username, filename)
+        transfer = self._find_transfer(username, filename)
+        target_state = transfer.get("state", "Unknown")
         if str(target_state).lower() not in _COMPLETED_TRANSFER_STATES:
-            return {"state": target_state, "percentComplete": percent_complete}
+            return transfer
 
         base = os.path.basename(filename.replace("\\", "/").replace("/", os.sep))
         # Buscar en temporales y mover el archivo terminado a la carpeta final.
@@ -363,7 +441,7 @@ class SlskdClient:
             # Ya pudo haber sido movido a la carpeta final.
             matches = glob.glob(os.path.join(self.state.current_downloads_dir, "**", glob.escape(base)), recursive=True)
         if not matches:
-            return {"state": target_state, "percentComplete": percent_complete}
+            return transfer
 
         latest = max(matches, key=os.path.getmtime)
         latest_abs = os.path.abspath(latest)
@@ -393,16 +471,51 @@ class SlskdClient:
             except Exception as e:
                 self.state.logs.add(f"[slskd] download move error: {e}")
                 return {"state": "error", "error": str(e), "saved": False}
+        metadata = self.pending_metadata.get(download_key, {})
+        track_name = str(metadata.get("track_name", "")).strip()
+        artists = str(metadata.get("artists", "")).strip()
+        track_key = metadata.get("track_key")
+        if track_key and track_name and artists and latest:
+            try:
+                folder = os.path.dirname(latest)
+                base = os.path.basename(latest)
+                ext = os.path.splitext(base)[1]
+                safe_name = safe_dirname(f"{track_name} - {artists}")[:120] or "sin_nombre"
+                new_base = f"{safe_name}{ext}"
+                if new_base != base:
+                    new_path = os.path.join(folder, new_base)
+                    n = 1
+                    while os.path.exists(new_path):
+                        new_base = f"{safe_name} ({n}){ext}"
+                        new_path = os.path.join(folder, new_base)
+                        n += 1
+                    os.rename(latest, new_path)
+                    latest = new_path
+                    self.state.logs.add(f"[slskd] archivo renombrado: {new_base}")
+                    write_audio_metadata(latest, track_name, artists, metadata.get("album", ""))
+            except Exception as e:
+                self.state.logs.add(f"[slskd] error al renombrar/retaggear: {e}")
+
         rel = os.path.relpath(latest, self.state.current_downloads_dir).replace("\\", "/")
         metadata = self.pending_metadata.pop(download_key, {})
-        if folder_name:
+        download_id = metadata.get("download_id")
+        if download_id:
+            complete_download(download_id, rel)
+        track_key = metadata.get("track_key")
+        if track_key:
             self.state.library.register_track(
-                metadata.get("track_key"),
+                track_key,
                 metadata.get("track_name"),
                 metadata.get("artists"),
                 rel,
                 metadata.get("cover_url", ""),
             )
+            playlist_key = metadata.get("playlist_key")
+            if playlist_key:
+                try:
+                    set_playlist_track_status(playlist_key, track_key, downloaded=True)
+                except Exception as exc:
+                    self.state.logs.add(f"[playlist] Error al marcar descarga: {exc}")
         self.pending_folders.pop(download_key, None)
         return {"state": "Completed", "path": rel, "saved": True, "percentComplete": 100}
 

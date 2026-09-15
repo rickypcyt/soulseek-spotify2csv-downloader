@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import mimetypes
 import os
+import subprocess
 from typing import TYPE_CHECKING
 
-from flask import Blueprint, abort, request, send_file
+from flask import Blueprint, abort, jsonify, request, send_file
 
 from backend.fs_utils import safe_join
 
@@ -34,6 +35,27 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         if not os.path.isfile(full):
             abort(404)
         return send_file(full, as_attachment=True, download_name=os.path.basename(full))
+
+    @bp.route("/api/file/reveal", methods=["POST"])
+    def api_file_reveal():
+        data = request.get_json() or {}
+        rel = str(data.get("path", "")).strip()
+        dir_key = str(data.get("dir", "downloads")).strip()
+        if not rel or dir_key not in {"downloads", "previews"}:
+            return jsonify({"error": "Archivo o directorio inválido"}), 400
+        try:
+            full = _resolve(dir_key, rel)
+        except ValueError:
+            return jsonify({"error": "Path inválido"}), 403
+        if not os.path.isfile(full):
+            return jsonify({"error": "El archivo no existe"}), 404
+        if os.name != "nt":
+            return jsonify({"error": "Abrir el explorador está disponible en Windows"}), 501
+        try:
+            subprocess.Popen(["explorer.exe", f"/select,{os.path.normpath(full)}"])
+            return jsonify({"ok": True})
+        except OSError as exc:
+            return jsonify({"error": str(exc)}), 500
 
     @bp.route("/api/file/stream")
     def api_file_stream():

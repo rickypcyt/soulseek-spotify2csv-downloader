@@ -89,7 +89,8 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         data = request.get_json() or {}
         pick_mode = data.get("pickMode", "quality")
         format_pref = data.get("formatPref", "any")
-        save_search_prefs(pick_mode, format_pref)
+        format_filters = data.get("formatFilters")
+        save_search_prefs(pick_mode, format_pref, format_filters if isinstance(format_filters, list) else None)
         return jsonify({"ok": True})
 
     return bp

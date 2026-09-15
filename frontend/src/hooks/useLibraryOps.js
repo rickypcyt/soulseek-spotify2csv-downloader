@@ -48,8 +48,9 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
     }
   }, [fetchDiagnostics])
 
-  const saveTemporaryPreviewToLibrary = useCallback(async (path) => {
-    if (!outputFolderName.trim()) {
+  const saveTemporaryPreviewToLibrary = useCallback(async (path, folderName = '') => {
+    const targetFolder = folderName.trim() || outputFolderName.trim()
+    if (!targetFolder) {
       toast.info('Escribe una carpeta de playlist para mover el preview')
       return
     }
@@ -57,7 +58,7 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
       await requestJson('/api/preview/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path, folder_name: outputFolderName }),
+        body: JSON.stringify({ path, folder_name: targetFolder }),
       })
       await fetchDiagnostics()
       toast.success('Preview movido a la biblioteca')
@@ -77,6 +78,28 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
       toast.success(`Preview movido a ${targetFolder}`)
     } catch (err) {
       toast.error('No se pudo mover el preview al playlist: ' + err.message)
+    }
+  }, [fetchDiagnostics])
+
+  const renameLibraryFile = useCallback(async (path, { preview = false } = {}) => {
+    const endpoint = preview ? '/api/library/rename/preview' : '/api/library/rename'
+    try {
+      const data = await requestJson(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      if (!preview) {
+        await fetchDiagnostics()
+        toast.success(`Archivo renombrado: ${data.path}`)
+      }
+      return data
+    } catch (err) {
+      if (!preview) {
+        toast.error('No se pudo renombrar el archivo: ' + err.message)
+      } else {
+        throw err
+      }
     }
   }, [fetchDiagnostics])
 
@@ -129,6 +152,7 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
     cancelTransfer,
     saveTemporaryPreviewToLibrary,
     moveLibraryFile,
+    renameLibraryFile,
     createLibraryFolder,
   }
 }

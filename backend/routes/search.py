@@ -29,6 +29,22 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         body, status = state.slskd.create_search(query)
         return jsonify(body), status
 
+    @bp.route("/api/soulseek/users/status", methods=["POST"])
+    def api_soulseek_user_statuses():
+        data = request.get_json() or {}
+        usernames = data.get("usernames", [])
+        if not isinstance(usernames, list):
+            return jsonify({"error": "usernames debe ser una lista"}), 400
+        unique_usernames = list(dict.fromkeys(
+            str(username).strip() for username in usernames if str(username).strip()
+        ))[:50]
+        return jsonify({
+            "statuses": {
+                username: state.slskd.user_status(username)
+                for username in unique_usernames
+            }
+        })
+
     @bp.route("/api/search_soulseek/<search_id>", methods=["GET", "DELETE"])
     @bp.route("/api/search_slskr/<search_id>", methods=["GET", "DELETE"])
     def api_get_search_soulseek(search_id):

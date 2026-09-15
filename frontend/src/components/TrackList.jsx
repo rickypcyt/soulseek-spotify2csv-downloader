@@ -5,6 +5,8 @@ import TrackCard from './TrackCard'
 
 export default function TrackList({
   tracks,
+  localPlaylists,
+  formatFilters,
   loading,
   selected,
   onSelectAll,
@@ -29,7 +31,7 @@ export default function TrackList({
   onToggleExpandedSearch,
   collapsedSearches,
   onToggleCollapsedSearch,
-  activePreview,
+  previews,
   onStartPreview,
   onSavePreview,
   onDiscardPreview,
@@ -37,6 +39,7 @@ export default function TrackList({
   storedFileStreamUrl,
   storedFileUrl,
   onCancelDownload,
+  onEmbedCover,
   onRefreshSearch,
   onCancelSearch,
 }) {
@@ -79,6 +82,8 @@ export default function TrackList({
         key={i}
         track={t}
         index={i}
+        localPlaylists={localPlaylists}
+        formatFilters={formatFilters}
         selected={selected.has(i)}
         onToggleSelect={onToggleSelect}
         actualDownloaded={isTrackDownloaded(t)}
@@ -98,7 +103,7 @@ export default function TrackList({
         onSearchTrack={onSearchTrack}
         pickMode={pickMode}
         formatPref={formatPref}
-        activePreview={activePreview}
+        previews={previews}
         onStartPreview={onStartPreview}
         onSavePreview={onSavePreview}
         onDiscardPreview={onDiscardPreview}
@@ -106,6 +111,7 @@ export default function TrackList({
         storedFileStreamUrl={storedFileStreamUrl}
         storedFileUrl={storedFileUrl}
         onCancelDownload={onCancelDownload}
+        onEmbedCover={onEmbedCover}
         onRefreshSearch={onRefreshSearch}
         onCancelSearch={onCancelSearch}
         embedOpen={activeEmbedIndex === i}

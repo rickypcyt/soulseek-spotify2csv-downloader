@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+import { toast } from 'react-toastify'
 import { CheckCircle2, Clock3, EyeOff } from 'lucide-react'
 import { Checkbox, Chip } from './ui'
 import SearchResults from './SearchResults'
@@ -7,6 +9,8 @@ import { FONT_MONO, RESULTS_PER_TRACK, formatDuration } from '../constants'
 export default function TrackCard({
   track,
   index,
+  localPlaylists,
+  formatFilters,
   selected,
   onToggleSelect,
   actualDownloaded,
@@ -26,7 +30,7 @@ export default function TrackCard({
   onSearchTrack,
   pickMode,
   formatPref,
-  activePreview,
+  previews,
   onStartPreview,
   onSavePreview,
   onDiscardPreview,
@@ -34,6 +38,7 @@ export default function TrackCard({
   storedFileStreamUrl,
   storedFileUrl,
   onCancelDownload,
+  onEmbedCover,
   onRefreshSearch,
   onCancelSearch,
   embedOpen,
@@ -42,11 +47,43 @@ export default function TrackCard({
   const t = track
   const i = index
   const downloaded = actualDownloaded || manuallyDownloaded || trackDownloads.some((download) => download.state === 'completado')
+  const localCoverUrl = trackDownloads.find((download) => download.state === 'completado' && download.coverUrl)?.coverUrl
+
+  const hasDownloading = trackDownloads.some((download) => download.state === 'descargando')
+  const hasQueued = trackDownloads.some((download) => download.state === 'encolando')
+  const isSearching = Boolean(search && !search.raw?.isComplete)
+  const hasNoResults = Boolean(search?.raw?.isComplete && (search?.raw?.results || []).length === 0)
+
+  const borderClass = downloaded
+    ? 'border-[#6B7280]/60'
+    : hasDownloading
+      ? 'border-emerald-400/60'
+      : hasQueued
+        ? 'border-blue-400/60'
+        : hasNoResults
+          ? 'border-red-400/60'
+          : isSearching
+            ? 'border-amber-400/60'
+            : 'border-[#2C303D]'
+
+  const notifiedPercents = useRef({})
+
+  useEffect(() => {
+    trackDownloads.forEach((download) => {
+      if (download.state === 'descargando') {
+        const percent = Math.round(download.percent || 0)
+        if (percent > 0 && percent % 25 === 0 && notifiedPercents.current[download.id] !== percent) {
+          notifiedPercents.current[download.id] = percent
+          toast.info(`Descargando · ${percent}% · ${download.filename}`)
+        }
+      }
+    })
+  }, [trackDownloads])
 
   return (
     <div
       key={i}
-      className={`group relative overflow-hidden fade-in rounded-lg border border-[#2C303D] bg-[#161822] p-4 ${downloaded ? 'border-[#6B7280]/60' : ''}`}
+      className={`group relative overflow-visible fade-in rounded-lg border bg-[#161822] p-4 ${borderClass}`}
       style={{ animationDelay: `${i * 40}ms` }}
     >
       <div className="flex items-start gap-3">
@@ -57,6 +94,17 @@ export default function TrackCard({
             title="Seleccionar pista"
           />
         </div>
+        {(localCoverUrl || t.cover_url) ? (
+          <img
+            src={localCoverUrl || t.cover_url}
+            alt={`Portada de ${t.track_name}`}
+            loading="lazy"
+            className="h-14 w-14 shrink-0 rounded object-cover"
+            onError={(event) => {
+              event.currentTarget.style.display = 'none'
+            }}
+          />
+        ) : null}
         <div className="min-w-0 flex-1">
           <h3 className="truncate text-[15px] font-medium leading-tight text-[#E9EAF0]">
             {t.track_name}
@@ -103,10 +151,25 @@ export default function TrackCard({
         <div className="mt-2 flex flex-wrap gap-1.5">
           {trackDownloads.map((download) => (
             <span key={download.id}>
-              {download.state === 'encolando' && <Chip tone="amber">encolando · {download.filename}</Chip>}
-              {download.state === 'descargando' && <Chip tone="amber">descargando {Math.round(download.percent || 0)}% · {download.filename}</Chip>}
-              {download.state === 'completado' && <Chip tone="teal">descargado{download.path ? ` · ${download.path}` : ''}</Chip>}
+              {download.state === 'encolando' && <Chip tone="queued">encolando · {download.filename}</Chip>}
+              {download.state === 'descargando' && <Chip tone="active">descargando {Math.round(download.percent || 0)}% · {download.filename}</Chip>}
+              {download.state === 'completado' && (
+                <>
+                  <Chip tone="teal">descargado{download.path ? ` · ${download.path}` : ''}</Chip>
+                  {download.path && t.cover_url && (
+                    <button
+                      type="button"
+                      onClick={() => onEmbedCover(download, t)}
+                      className="rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
+                    >
+                      download cover
+                    </button>
+                  )}
+                </>
+              )}
               {download.state === 'cancelado' && <Chip tone="neutral">cancelado · {download.filename}</Chip>}
+              {download.state === 'offline' && <Chip tone="amber">usuario offline · {download.filename}</Chip>}
+              {download.state === 'no_disponible' && <Chip tone="amber">usuario no disponible · {download.filename}</Chip>}
               {download.state === 'error' && <Chip tone="coral">error · {download.error}</Chip>}
             </span>
           ))}
@@ -116,6 +179,7 @@ export default function TrackCard({
       {!downloaded && (spotifyTrackId || t.spotify_preview) && (
         <SpotifyEmbed
           trackId={spotifyTrackId}
+          spotifyUrl={t.spotify_url}
           previewUrl={t.spotify_preview}
           open={embedOpen}
           onToggle={onToggleEmbed}
@@ -127,6 +191,12 @@ export default function TrackCard({
           type="text"
           value={t.search_query}
           onChange={(e) => onUpdateQuery(i, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              onSearchTrack(i, e.currentTarget.value)
+            }
+          }}
           placeholder="artista - canción para buscar en Soulseek"
           className="min-w-0 flex-1 rounded border border-[#2C303D] bg-[#0D0F16] px-2.5 py-1.5 text-xs text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
           style={{ fontFamily: FONT_MONO }}
@@ -159,8 +229,10 @@ export default function TrackCard({
             onToggleCollapsed={onToggleCollapsedSearch}
             trackDownloaded={downloaded}
             trackDownloads={trackDownloads}
-            activePreview={activePreview}
-            onStartPreview={(res) => onStartPreview(res, i)}
+            previews={previews}
+            localPlaylists={localPlaylists}
+            formatFilters={formatFilters}
+            onStartPreview={(res, folderName) => onStartPreview(res, i, folderName)}
             onSavePreview={onSavePreview}
             onDiscardPreview={onDiscardPreview}
             onCancelPreview={onCancelPreview}

@@ -37,14 +37,20 @@ function preferenceComparator(results, mode = 'quality') {
   return comparators[mode] || comparators.quality
 }
 
-export function rankResults(results, query = '', mode = 'quality', formatPref = 'any') {
+export function rankResults(results, query = '', mode = 'quality', formatPref = 'any', allowedFormats = null) {
   if (!Array.isArray(results)) return []
 
+  const normalizedFormats = Array.isArray(allowedFormats)
+    ? new Set(allowedFormats.map((format) => String(format).toLowerCase()))
+    : null
+  const formatResults = normalizedFormats && normalizedFormats.size > 0
+    ? results.filter((result) => normalizedFormats.has(extOf(result)))
+    : results
   const queryText = normalizeText(query)
   const queryTokens = queryText.split(' ').filter((token) => token.length > 1)
   const unique = new Map()
 
-  results.forEach((result) => {
+  formatResults.forEach((result) => {
     const filename = result.filename || result.file || result.name || result.path || ''
     const key = `${normalizeText(filename)}|${Number(result.size) || 0}`
     const previous = unique.get(key)
@@ -75,6 +81,6 @@ export function rankResults(results, query = '', mode = 'quality', formatPref = 
     .map(({ result }) => result)
 }
 
-export function pickBest(results, mode = 'quality', formatPref = 'any') {
-  return rankResults(results, '', mode, formatPref)[0] || null
+export function pickBest(results, mode = 'quality', formatPref = 'any', allowedFormats = null) {
+  return rankResults(results, '', mode, formatPref, allowedFormats)[0] || null
 }

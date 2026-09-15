@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
+from backend.database import set_playlist_track_status
 from backend.fs_utils import move_file_with_retry, remove_file_with_retry, safe_dirname, safe_join
 from backend.spotify_service import read_tracks, run_conversion
 from backend.spotify_to_csv import parse_spotify_id
@@ -37,6 +38,9 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
     def api_preview():
         data = request.get_json() or {}
         url = data.get("url", "").strip()
+        provider = str(data.get("provider", "spotify")).strip().lower()
+        if provider not in {"spotify", "soulseek"}:
+            provider = "spotify"
         if not url:
             state.logs.add("[web] Error: falta URL o texto")
             return jsonify({"error": "Pegá un link de Spotify o texto para buscar en Soulseek."}), 400
@@ -48,6 +52,15 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                 is_spotify_link = False
 
             if not is_spotify_link:
+                tracks = []
+                if provider == "spotify":
+                    try:
+                        tracks = state.spotify_auth.search_tracks(url)
+                    except Exception as spotify_error:
+                        state.logs.add(f"[spotify] búsqueda libre no disponible: {spotify_error}")
+                if provider == "spotify" and tracks:
+                    state.logs.add(f"[web] búsqueda libre en Spotify: {url} · {len(tracks)} resultado(s)")
+                    return jsonify({"tracks": tracks, "playlist_name": f"Resultados Spotify · {url}", "source": "spotify_search"})
                 tracks = [{
                     "track_name": url,
                     "artists": "",
@@ -56,6 +69,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                     "spotify_url": "",
                     "spotify_preview": "",
                     "search_query": url,
+                    "cover_url": "",
                 }]
                 state.logs.add(f"[web] búsqueda de texto directo: {url}")
                 return jsonify({"tracks": tracks, "playlist_name": "Búsqueda Soulseek", "source": "soulseek"})
@@ -114,6 +128,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         data = request.get_json() or {}
         rel = str(data.get("path", "")).strip()
         folder_name = str(data.get("folder_name", "")).strip() or state.library.playlist_name()
+        playlist_key = str(data.get("playlist_key", "")).strip()
         track_key = str(data.get("track_key", "")).strip()
         track_name = str(data.get("track_name", "")).strip()
         artists = str(data.get("artists", "")).strip()
@@ -138,6 +153,8 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                     move_file_with_retry(source, destination)
             saved_path = os.path.relpath(destination, state.current_downloads_dir).replace("\\", "/")
             state.library.register_track(track_key, track_name, artists, saved_path, cover_url)
+            if playlist_key and track_key:
+                set_playlist_track_status(playlist_key, track_key, downloaded=True)
             state.logs.add(f"[library] preview guardado en {saved_path}")
             return jsonify({"ok": True, "path": saved_path, "folder": safe_dirname(folder_name)})
         except Exception as exc:

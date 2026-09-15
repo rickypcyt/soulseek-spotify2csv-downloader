@@ -1,11 +1,8 @@
 import { StatusItem } from './ui'
 
-export default function ConfigurationStatus({ config, diagnostics, backendOnline }) {
+export default function ConfigurationStatus({ config, diagnostics, backendOnline, spotifyAuth, onStartSpotifyAuth }) {
   const status = diagnostics?.configuration
   const hasStatus = Boolean(status)
-  const spotifyReady = hasStatus
-    ? Boolean(status.spotify?.clientIdConfigured && status.spotify?.clientSecretConfigured)
-    : Boolean(config?.spotify_client_id && config?.spotify_client_secret_configured)
   const slskdReady = hasStatus
     ? Boolean(status.slskd?.reachable && status.slskd?.apiKeyConfigured)
     : false
@@ -27,13 +24,34 @@ export default function ConfigurationStatus({ config, diagnostics, backendOnline
         </span>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <StatusItem
-          label="Spotify"
-          description={spotifyReady ? 'Credenciales configuradas. Puedes cargar playlists.' : 'Falta el Client ID o Client Secret en la configuración.'}
-          ready={spotifyReady}
-          readyLabel="Conectado"
-          pending={!hasStatus}
-        />
+        <div className={`rounded-lg border p-4 ${spotifyAuth?.status === 'authenticated' ? 'border-blue-400/40 bg-blue-400/10' : 'border-slate-600 bg-slate-900/40'}`}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold text-slate-100">Spotify</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-300">
+                {spotifyAuth?.status === 'authenticated'
+                  ? 'Spotify está conectado. Puedes cargar playlists privadas.'
+                  : spotifyAuth?.status === 'authenticating'
+                    ? 'Completa la autorización en la ventana del navegador…'
+                    : spotifyAuth?.status === 'not_configured'
+                      ? 'Guarda primero Client ID y Client Secret.'
+                      : 'Spotify necesita autorización para leer tus playlists.'}
+              </p>
+              {spotifyAuth?.error && <p className="mt-2 text-xs text-red-200">{spotifyAuth.error}</p>}
+            </div>
+            <span className="rounded-full border border-slate-500 px-3 py-1 text-sm text-slate-200">
+              {spotifyAuth?.status === 'authenticated' ? 'conectado' : spotifyAuth?.status === 'authenticating' ? 'autorizando…' : 'no conectado'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onStartSpotifyAuth}
+            disabled={spotifyAuth?.status === 'authenticating' || !config.spotify_client_id || !config.spotify_client_secret_configured}
+            className="mt-3 rounded bg-[#FFFFFF] px-3 py-1.5 text-xs font-medium text-[#161822] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {spotifyAuth?.status === 'authenticated' ? 'reautorizar Spotify' : 'conectar Spotify'}
+          </button>
+        </div>
         <StatusItem
           label="Soulseek / slskd"
           description={slskdReady ? `Servicio conectado en ${status.slskd.url}.` : 'El servicio no responde o falta la API key. Revisa slskd.exe y su URL.'}

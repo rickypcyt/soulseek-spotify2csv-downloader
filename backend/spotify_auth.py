@@ -6,6 +6,7 @@ import threading
 from typing import TYPE_CHECKING
 
 import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
 
 from backend.spotify_to_csv import LocalSpotifyOAuth
 
@@ -75,6 +76,113 @@ class SpotifyAuthManager:
             self._thread = threading.Thread(target=self._worker, daemon=True)
             self._thread.start()
         return {"status": "authenticating"}, 202
+
+    def search_tracks(self, query: str, limit: int = 10) -> list[dict[str, str]]:
+        config = self.state.config_store.get()
+        client_id = config.get("spotify_client_id", "")
+        client_secret = self.state.config_store.get_secret("spotify_client_secret")
+        if not client_id or not client_secret:
+            raise RuntimeError("Configura Spotify Client ID y Client Secret en Settings.")
+        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        spotify = spotipy.Spotify(auth_manager=auth)
+        items = spotify.search(q=query, type="track", limit=limit).get("tracks", {}).get("items", [])
+        tracks: list[dict[str, str]] = []
+        for track in items:
+            album = track.get("album") or {}
+            artists = " ".join(artist.get("name", "") for artist in track.get("artists", []))
+            images = album.get("images") or []
+            tracks.append({
+                "track_name": str(track.get("name") or ""),
+                "artists": artists,
+                "album": str(album.get("name") or ""),
+                "duration_ms": str(track.get("duration_ms") or ""),
+                "spotify_url": str((track.get("external_urls") or {}).get("spotify") or ""),
+                "spotify_preview": str(track.get("preview_url") or ""),
+                "search_query": f"{artists} {track.get('name', '')}".strip(),
+                "cover_url": str(images[0].get("url") if images else ""),
+            })
+        return tracks
+
+    def search_track_metadata(self, query: str) -> dict[str, str]:
+        config = self.state.config_store.get()
+        client_id = config.get("spotify_client_id", "")
+        client_secret = self.state.config_store.get_secret("spotify_client_secret")
+        if not client_id or not client_secret:
+            raise RuntimeError("Configura Spotify Client ID y Client Secret en Settings.")
+        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        spotify = spotipy.Spotify(auth_manager=auth)
+        results = spotify.search(q=query, type="track", limit=1).get("tracks", {}).get("items", [])
+        if not results:
+            raise RuntimeError("No se encontró el track en Spotify.")
+        track = results[0]
+        images = (track.get("album") or {}).get("images") or []
+        return {
+            "track_key": str(track.get("id") or ""),
+            "track_name": str(track.get("name") or ""),
+            "artists": " ".join(artist.get("name", "") for artist in track.get("artists", [])),
+            "album": str((track.get("album") or {}).get("name") or ""),
+            "cover_url": str(images[0].get("url") if images else ""),
+        }
+
+    def get_track_metadata(self, track_key: str) -> dict[str, str]:
+        if not track_key or len(track_key) != 22 or ":" in track_key:
+            raise RuntimeError("track_key no es un ID de Spotify")
+        config = self.state.config_store.get()
+        client_id = config.get("spotify_client_id", "")
+        client_secret = self.state.config_store.get_secret("spotify_client_secret")
+        if not client_id or not client_secret:
+            raise RuntimeError("Configura Spotify Client ID y Client Secret en Settings.")
+        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        spotify = spotipy.Spotify(auth_manager=auth)
+        track = spotify.track(track_key)
+        album = track.get("album") or {}
+        images = album.get("images") or []
+        artists = " ".join(artist.get("name", "") for artist in track.get("artists", []))
+        return {
+            "track_key": str(track.get("id") or ""),
+            "track_name": str(track.get("name") or ""),
+            "artists": artists,
+            "album": str(album.get("name") or ""),
+            "cover_url": str(images[0].get("url") if images else ""),
+        }
+
+    def search_bpm(self, track_key: str, track_name: str, artists: str) -> float:
+        config = self.state.config_store.get()
+        client_id = config.get("spotify_client_id", "")
+        client_secret = self.state.config_store.get_secret("spotify_client_secret")
+        if not client_id or not client_secret:
+            raise RuntimeError("Configura Spotify Client ID y Client Secret en Settings.")
+        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        spotify = spotipy.Spotify(auth_manager=auth)
+        features = spotify.audio_features([track_key])[0]
+        if features and features.get("tempo"):
+            return round(float(features["tempo"]), 2)
+        query = f"track:{track_name} artist:{artists}".strip()
+        results = spotify.search(q=query, type="track", limit=1).get("tracks", {}).get("items", [])
+        if not results:
+            raise RuntimeError("No se encontró el track en Spotify para obtener el BPM.")
+        spotify_id = results[0].get("id")
+        fallback = spotify.audio_features([spotify_id])[0] if spotify_id else None
+        if not fallback or not fallback.get("tempo"):
+            raise RuntimeError("Spotify no proporcionó el BPM de este track.")
+        return round(float(fallback["tempo"]), 2)
+
+    def search_cover(self, track_name: str, artists: str) -> str:
+        config = self.state.config_store.get()
+        client_id = config.get("spotify_client_id", "")
+        client_secret = self.state.config_store.get_secret("spotify_client_secret")
+        if not client_id or not client_secret:
+            raise RuntimeError("Configura Spotify Client ID y Client Secret en Settings.")
+        auth = SpotifyClientCredentials(client_id=client_id, client_secret=client_secret)
+        spotify = spotipy.Spotify(auth_manager=auth)
+        query = f"track:{track_name} artist:{artists}".strip()
+        results = spotify.search(q=query, type="track", limit=1).get("tracks", {}).get("items", [])
+        if not results:
+            raise RuntimeError("No se encontró una portada coincidente en Spotify.")
+        images = (results[0].get("album") or {}).get("images") or []
+        if not images or not images[0].get("url"):
+            raise RuntimeError("El track encontrado no tiene portada en Spotify.")
+        return images[0]["url"]
 
     def playlists(self) -> tuple[list[dict[str, str]], str | None]:
         """Return (playlists, error_message)."""

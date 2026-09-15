@@ -2,5 +2,6 @@ Flask>=3.0,<4
 requests>=2.31,<3
 spotipy>=2.23,<3
 keyring>=25,<26
+mutagen>=1.47,<2
 pytest>=8,<9
 ruff>=0.8,<1

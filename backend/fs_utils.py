@@ -11,8 +11,8 @@ import re
 import shutil
 import time
 
-_MOVE_RETRIES = 8
-_RETRY_DELAY = 0.2
+_MOVE_RETRIES = 20
+_RETRY_DELAY = 0.25
 
 
 def safe_dirname(name: str) -> str:

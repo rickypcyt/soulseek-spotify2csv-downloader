@@ -68,15 +68,16 @@ def fetch_tracks(sp, link_type, link_id):
         tracks.append(sp.track(link_id))
 
     elif link_type == "album":
-        album_name = sp.album(link_id)["name"]
+        album = sp.album(link_id)
+        album_data = {"name": album.get("name", ""), "images": album.get("images", [])}
         results = sp.album_tracks(link_id)
         for item in results["items"]:
-            item["album"] = {"name": album_name}
+            item["album"] = album_data
             tracks.append(item)
         while results.get("next"):
             results = sp.next(results)
             for item in results["items"]:
-                item["album"] = {"name": album_name}
+                item["album"] = album_data
                 tracks.append(item)
 
     elif link_type == "playlist":
@@ -110,7 +111,10 @@ def write_csv(tracks, filename):
             album = track.get("album", {}) if isinstance(track.get("album"), dict) else {}
             album_name = album.get("name", "")
             images = album.get("images", []) if isinstance(album, dict) else []
-            cover_url = images[-1]["url"] if images else ""
+            cover_url = next(
+                (image.get("url", "") for image in images if isinstance(image, dict) and image.get("url")),
+                "",
+            )
             duration = track.get("duration_ms", "")
             url = track.get("external_urls", {}).get("spotify", "")
             preview = track.get("preview_url", "") or ""
