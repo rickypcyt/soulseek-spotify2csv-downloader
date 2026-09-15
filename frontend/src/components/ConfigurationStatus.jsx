@@ -38,6 +38,16 @@ export default function ConfigurationStatus({ config, diagnostics, backendOnline
                       : 'Spotify necesita autorización para leer tus playlists.'}
               </p>
               {spotifyAuth?.error && <p className="mt-2 text-xs text-red-200">{spotifyAuth.error}</p>}
+              {spotifyAuth?.status === 'authenticating' && spotifyAuth?.url && (
+                <a
+                  href={spotifyAuth.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 block break-all text-xs text-blue-300 underline"
+                >
+                  Abrir link de autorización de Spotify
+                </a>
+              )}
             </div>
             <span className="rounded-full border border-slate-500 px-3 py-1 text-sm text-slate-200">
               {spotifyAuth?.status === 'authenticated' ? 'conectado' : spotifyAuth?.status === 'authenticating' ? 'autorizando…' : 'no conectado'}

@@ -235,21 +235,23 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
         <span className="hidden xl:inline">{downloadLabel}</span>
       </button>
       {downloadMenuOpen && downloadPlaylists.length > 0 && (
-        <div className="absolute bottom-full left-0 z-50 mb-1 min-w-44 rounded-md border border-[#343949] bg-[#161822] p-1 shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
-          <p className="px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-[#8D93A6]">elegir playlist</p>
-          {downloadPlaylists.map((playlist) => (
-            <button
-              key={playlist}
-              type="button"
-              onClick={() => {
-                setDownloadMenuOpen(false)
-                onDownload(file.path, playlist)
-              }}
-              className="block w-full rounded px-2 py-1.5 text-left text-xs text-[#E9EAF0] hover:bg-[#2C303D]"
-            >
-              {playlist}
-            </button>
-          ))}
+        <div className="absolute bottom-full left-0 z-[100] mb-1 max-h-60 min-w-52 overflow-hidden rounded-lg border border-[#343949] bg-[#161822] shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
+          <div className="border-b border-[#2C303D] bg-[#161822] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[#8D93A6]">elegir playlist</div>
+          <div className="max-h-48 overflow-y-auto p-1.5">
+            {downloadPlaylists.map((playlist) => (
+              <button
+                key={playlist}
+                type="button"
+                onClick={() => {
+                  setDownloadMenuOpen(false)
+                  onDownload(file.path, playlist)
+                }}
+                className="block w-full rounded-md px-2.5 py-2 text-left text-xs text-[#E9EAF0] transition-colors hover:bg-[#FFFFFF]/10"
+              >
+                <span className="block truncate" title={playlist}>{playlist}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
     </div>

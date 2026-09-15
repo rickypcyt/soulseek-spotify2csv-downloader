@@ -1,7 +1,7 @@
 import csv
-import subprocess
-import sys
 from pathlib import Path
+
+from backend.spotify_to_csv import convert
 
 
 class SpotifyServiceError(RuntimeError):
@@ -14,29 +14,12 @@ def run_conversion(
     output: Path,
     environment: dict[str, str] | None = None,
 ) -> Path:
-    root = Path(run_script).resolve().parent
-    candidates = (
-        root / "backend" / "spotify_to_csv.py",
-        root / "spotify_to_csv.py",
-        Path(__file__).with_name("spotify_to_csv.py"),
-    )
-    converter_script = next((path for path in candidates if path.is_file()), None)
-    if converter_script is None:
-        raise SpotifyServiceError("No se encontró backend/spotify_to_csv.py.")
-    command = [sys.executable, str(converter_script), url, "-o", str(output)]
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False,
-            env=environment,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise SpotifyServiceError("La conversión de Spotify superó el límite de 5 minutos.") from exc
-    if result.returncode != 0:
-        raise SpotifyServiceError(result.stderr or result.stdout or "Error desconocido al convertir Spotify")
+        convert(url, str(output), environment)
+    except RuntimeError as exc:
+        raise SpotifyServiceError(str(exc)) from exc
+    except Exception as exc:
+        raise SpotifyServiceError(str(exc)) from exc
     return output
 
 

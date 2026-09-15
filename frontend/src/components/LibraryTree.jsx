@@ -34,7 +34,7 @@ export default function LibraryTree({
   const folders = Object.entries(node.folders).sort(([a], [b]) => a.localeCompare(b))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   return (
-    <div className={level > 0 ? 'ml-3 space-y-3 border-l-2 border-[#3A3F4E] pl-3' : 'grid grid-cols-1 gap-3 md:grid-cols-2'}>
+    <div className={level > 0 ? 'ml-3 space-y-3 border-l-2 border-[#3A3F4E] pl-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'}>
       {folders.map(([name, folder]) => {
         const sourceFolder = fullNode.folders[name] || folder
         const stats = getFolderStats(sourceFolder)

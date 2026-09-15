@@ -24,7 +24,7 @@ export default function TemporalesPanel({
   onDeleteFile,
 }) {
   return (
-    <div className="flex min-h-[calc(100dvh-9rem)] w-full min-w-0 flex-col rounded-lg border border-[#2C303D]">
+    <div className="flex h-full w-full min-w-0 flex-col rounded-lg border border-[#2C303D]">
       <div className="flex items-center justify-between border-b border-[#2C303D] px-3 py-2">
         <h2 className="text-xs text-[#8D93A6]">temporales</h2>
         <button
@@ -74,25 +74,26 @@ export default function TemporalesPanel({
             {diagnostics.previews?.length > 0 && (
               <div>
                 <p className="mb-1 text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>previews</p>
-                <div className="space-y-3">
+                <div className="flex flex-nowrap gap-3 overflow-x-auto pb-2">
                   {visiblePreviewFiles.map((f) => (
-                    <LibraryAudioCard
-                      key={f.path}
-                      file={{ ...f, name: f.path.split('/').pop() || f.path }}
-                      streamUrl={storedFileStreamUrl('previews', f.path)}
-                      coverUrl={`/api/library/cover?dir=previews&path=${encodeURIComponent(f.path)}`}
-                      onDownload={onSaveTemporaryPreview}
-                      downloadPlaylists={localPlaylists}
-                      onSearchCover={onSearchCover}
-                      onRevealFile={onRevealFile}
-                      downloadLabel="guardar en biblioteca"
-                      layout="horizontal"
-                      formatSize={formatSize}
-                      dragDir="previews"
-                      onDelete={(path) => {
-                        if (confirm(`¿Borrar ${path}?`)) onDeleteFile(path, 'previews')
-                      }}
-                    />
+                    <div key={f.path} className="w-72 shrink-0">
+                      <LibraryAudioCard
+                        file={{ ...f, name: f.path.split('/').pop() || f.path }}
+                        streamUrl={storedFileStreamUrl('previews', f.path)}
+                        coverUrl={`/api/library/cover?dir=previews&path=${encodeURIComponent(f.path)}`}
+                        onDownload={onSaveTemporaryPreview}
+                        downloadPlaylists={localPlaylists}
+                        onSearchCover={onSearchCover}
+                        onRevealFile={onRevealFile}
+                        downloadLabel="guardar en biblioteca"
+                        layout="horizontal"
+                        formatSize={formatSize}
+                        dragDir="previews"
+                        onDelete={(path) => {
+                          if (confirm(`¿Borrar ${path}?`)) onDeleteFile(path, 'previews')
+                        }}
+                      />
+                    </div>
                   ))}
                 </div>
               </div>

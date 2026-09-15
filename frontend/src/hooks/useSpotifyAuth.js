@@ -22,8 +22,12 @@ export function useSpotifyAuth() {
 
   const startSpotifyAuth = useCallback(async () => {
     try {
-      setSpotifyAuth(await requestJson('/api/spotify/auth/start', { method: 'POST' }))
-      toast.info('Se abrió Spotify en el navegador. Completa la autorización y vuelve aquí.')
+      const data = await requestJson('/api/spotify/auth/start', { method: 'POST' })
+      setSpotifyAuth(data)
+      if (data.url) {
+        window.open(data.url, '_blank', 'noopener,noreferrer')
+      }
+      toast.info('Se intentó abrir Spotify. Si no se abrió, usá el link mostrado.')
     } catch (err) {
       toast.error('No se pudo iniciar Spotify: ' + err.message)
     }

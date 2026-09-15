@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+import webbrowser
 
 import spotipy
 
@@ -35,6 +36,22 @@ class CloseableCallbackHandler(RequestHandler):
 
 class LocalSpotifyOAuth(SpotifyOAuth):
     """Use the improved callback page without modifying the spotipy package."""
+
+    def _open_auth_url(self):
+        auth_url = self.get_authorize_url()
+        print(f"[spotify] Para autorizar Spotify, abrí este link si no se abre automáticamente: {auth_url}")
+        opened = False
+        try:
+            opened = webbrowser.open(auth_url, new=2, autoraise=True)
+        except Exception as exc:
+            print(f"[spotify] webbrowser.open falló: {exc}")
+        if not opened and sys.platform == "win32":
+            try:
+                os.startfile(auth_url)
+                opened = True
+            except Exception as exc:
+                print(f"[spotify] os.startfile falló: {exc}")
+        return opened
 
     def _get_auth_response_local_server(self, redirect_port):
         server = start_local_http_server(redirect_port, handler=CloseableCallbackHandler)
@@ -123,22 +140,21 @@ def write_csv(tracks, filename):
             writer.writerow([name, artists, album_name, duration, url, preview, search_query, cover_url])
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Convierte un link de Spotify en un CSV.")
-    parser.add_argument("url", help="Link de Spotify (track, album, playlist o artist).")
-    parser.add_argument("-o", "--output", default="spotify_output.csv", help="Nombre del archivo CSV.")
-    args = parser.parse_args()
+def convert(url: str, output: str, environment: dict[str, str] | None = None) -> None:
+    if environment is not None:
+        os.environ.update(environment)
 
     client_id = os.getenv("SPOTIPY_CLIENT_ID")
     client_secret = os.getenv("SPOTIPY_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        print("Faltan las credenciales de Spotify.")
-        print("Registrá una app gratuita en https://developer.spotify.com/dashboard")
-        print("y exportá SPOTIPY_CLIENT_ID y SPOTIPY_CLIENT_SECRET.")
-        sys.exit(1)
+        raise RuntimeError(
+            "Faltan las credenciales de Spotify. "
+            "Registrá una app gratuita en https://developer.spotify.com/dashboard "
+            "y exportá SPOTIPY_CLIENT_ID y SPOTIPY_CLIENT_SECRET."
+        )
 
-    link_type, link_id = parse_spotify_id(args.url)
+    link_type, link_id = parse_spotify_id(url)
 
     if link_type == "playlist":
         redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8080/callback")
@@ -166,13 +182,25 @@ def main():
     else:
         name = tracks[0].get("name", "") if tracks else ""
 
-    write_csv(tracks, args.output)
+    write_csv(tracks, output)
 
-    name_file = os.path.splitext(args.output)[0] + "_playlist_name.txt"
+    name_file = os.path.splitext(output)[0] + "_playlist_name.txt"
     with open(name_file, "w", encoding="utf-8") as f:
         f.write(name)
 
-    print(f"Listo: {args.output} con {len(tracks)} pista(s).")
+    print(f"Listo: {output} con {len(tracks)} pista(s).")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Convierte un link de Spotify en un CSV.")
+    parser.add_argument("url", help="Link de Spotify (track, album, playlist o artist).")
+    parser.add_argument("-o", "--output", default="spotify_output.csv", help="Nombre del archivo CSV.")
+    args = parser.parse_args()
+    try:
+        convert(args.url, args.output)
+    except RuntimeError as exc:
+        print(exc)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -37,10 +37,8 @@ class SpotifyAuthManager:
             open_browser=True,
         )
 
-    def _worker(self) -> None:
+    def _worker(self, auth: LocalSpotifyOAuth) -> None:
         try:
-            auth = self._oauth()
-            self.auth_state = {"status": "authenticating", "error": None}
             auth.get_access_token(as_dict=True)
             self.auth_state = {"status": "authenticated", "error": None}
             self.state.logs.add("[spotify] Autorización completada desde Settings")
@@ -67,15 +65,16 @@ class SpotifyAuthManager:
     def start(self) -> tuple[dict[str, object], int]:
         with self._lock:
             if self._thread and self._thread.is_alive():
-                return {"status": "authenticating"}, 202
+                return dict(self.auth_state), 202
             try:
-                self._oauth()
+                auth = self._oauth()
             except Exception as exc:
                 return {"status": "not_configured", "error": str(exc)}, 400
-            self.auth_state = {"status": "authenticating", "error": None}
-            self._thread = threading.Thread(target=self._worker, daemon=True)
+            auth_url = auth.get_authorize_url()
+            self.auth_state = {"status": "authenticating", "url": auth_url, "error": None}
+            self._thread = threading.Thread(target=self._worker, args=(auth,), daemon=True)
             self._thread.start()
-        return {"status": "authenticating"}, 202
+        return dict(self.auth_state), 202
 
     def search_tracks(self, query: str, limit: int = 10) -> list[dict[str, str]]:
         config = self.state.config_store.get()

@@ -556,7 +556,7 @@ function App() {
       className="min-h-screen bg-[#10121A] text-[#E9EAF0]"
       style={{ fontFamily: FONT_BODY }}
     >
-      <div className="mx-auto w-full max-w-[1440px] px-5 py-8 sm:px-10 sm:py-10">
+      <div className="w-full px-5 py-8 sm:px-10 sm:py-10">
         <AppNavbar
           activeTab={activeTab}
           navigate={navigate}
@@ -683,8 +683,34 @@ function App() {
           </div>
 
           {/* monitor column */}
-          <div className={`${activeTab === 'main' ? 'hidden' : activeTab === 'logs' ? 'min-w-0 grid grid-cols-1 gap-4' : 'min-w-0 grid grid-cols-1 gap-4 lg:grid-cols-3'}`}>
-            <div className={`${activeTab === 'library' ? 'flex min-w-0 lg:col-span-2' : 'hidden'}`}>
+          <div className={`${activeTab === 'main' ? 'hidden' : activeTab === 'logs' ? 'min-w-0 grid grid-cols-1 gap-4' : 'min-w-0 grid grid-cols-1 gap-4'}`}>
+            <div className={`${activeTab === 'library' ? 'flex min-w-0 h-72' : 'hidden'}`}>
+              <TemporalesPanel
+                diagnostics={diagnostics}
+                activeTransfers={activeTransfers}
+                completedTransfers={completedTransfers}
+                completedTransfersOpen={completedTransfersOpen}
+                onToggleCompletedTransfers={setCompletedTransfersOpen}
+                onCleanupAll={cleanupAll}
+                onCancelTransfer={cancelTransfer}
+                visiblePreviewFiles={visiblePreviewFiles}
+                previewFilesCount={previewFiles.length}
+                currentPreviewPage={currentPreviewPage}
+                onPreviewPageChange={setPreviewPage}
+                storedFileStreamUrl={storedFileStreamUrl}
+                onSaveTemporaryPreview={saveTemporaryPreviewToLibrary}
+                localPlaylists={localPlaylists}
+                onSearchCover={(path) => searchAndEmbedCover(path, 'previews')}
+                onRevealFile={(path) => revealFile(path, 'previews')}
+                onDeleteFile={deleteItem}
+              />
+            </div>
+
+            <div className={`${activeTab === 'logs' ? 'flex min-w-0' : 'hidden'}`}>
+              <LogsPanel ref={logRef} logs={logs} backendOnline={backendOnline} />
+            </div>
+
+            <div className={`${activeTab === 'library' ? 'flex min-w-0' : 'hidden'}`}>
               <LibraryPanel
                 newLibraryFolderName={newLibraryFolderName}
                 onNewFolderNameChange={setNewLibraryFolderName}
@@ -710,32 +736,6 @@ function App() {
                 onDragOverFolder={setDragOverLibraryFolder}
                 onMoveFile={moveLibraryFile}
                 storedFileStreamUrl={storedFileStreamUrl}
-                onDeleteFile={deleteItem}
-              />
-            </div>
-
-            <div className={`${activeTab === 'logs' ? 'flex min-w-0' : 'hidden'}`}>
-              <LogsPanel ref={logRef} logs={logs} backendOnline={backendOnline} />
-            </div>
-
-            <div className={`${activeTab === 'library' ? 'flex min-w-0 lg:col-span-1' : 'hidden'}`}>
-              <TemporalesPanel
-                diagnostics={diagnostics}
-                activeTransfers={activeTransfers}
-                completedTransfers={completedTransfers}
-                completedTransfersOpen={completedTransfersOpen}
-                onToggleCompletedTransfers={setCompletedTransfersOpen}
-                onCleanupAll={cleanupAll}
-                onCancelTransfer={cancelTransfer}
-                visiblePreviewFiles={visiblePreviewFiles}
-                previewFilesCount={previewFiles.length}
-                currentPreviewPage={currentPreviewPage}
-                onPreviewPageChange={setPreviewPage}
-                storedFileStreamUrl={storedFileStreamUrl}
-                onSaveTemporaryPreview={saveTemporaryPreviewToLibrary}
-                localPlaylists={localPlaylists}
-                onSearchCover={(path) => searchAndEmbedCover(path, 'previews')}
-                onRevealFile={(path) => revealFile(path, 'previews')}
                 onDeleteFile={deleteItem}
               />
             </div>
