@@ -13,6 +13,7 @@ import SettingsPanel from './components/SettingsPanel'
 import SourceInput from './components/SourceInput'
 import TemporalesPanel from './components/TemporalesPanel'
 import TrackList from './components/TrackList'
+import WelcomeWizard from './components/WelcomeWizard'
 import { FONT_BODY, PREVIEW_PAGE_SIZE, isCompletedTransfer, isLibraryFile } from './constants'
 import { pickBest, rankResults } from './utils/resultPicker'
 import { getSpotifyTrackId, matchesLibraryFile, trackIdentity } from './utils/spotify'
@@ -58,6 +59,9 @@ function App() {
   const [formatPref, setFormatPref] = useState('any')
   const [formatFilters, setFormatFilters] = useState(['mp3', 'wav', 'aiff', 'flac'])
   const [initialSearches, setInitialSearches] = useState([])
+  const [welcomeDismissed, setWelcomeDismissed] = useState(
+    () => localStorage.getItem('welcome_dismissed') === '1'
+  )
   const logRef = useRef(null)
   const downloadSelectedTimers = useRef([])
 
@@ -96,7 +100,7 @@ function App() {
 
   // ---- composed hooks ----
   const { navigate, activeTab } = useTabNavigation()
-  const { config, setConfig, saveConfig, savingConfig } = useConfig()
+  const { config, setConfig, saveConfig, savingConfig, configLoaded } = useConfig()
   const { diagnostics, fetchDiagnostics } = useDiagnostics()
   const { libraryIndex, fetchLibraryIndex } = useLibraryIndex()
   const { logs, backendOnline } = useLogs()
@@ -738,6 +742,26 @@ function App() {
           </div>
         </div>
         <AppFooter />
+        {(() => {
+          const setupIncomplete = !config.downloads_dir || !config.soulseek_username ||
+            !config.spotify_client_id || !config.spotify_client_secret_configured
+          const showWelcome = configLoaded && setupIncomplete && !welcomeDismissed
+          return showWelcome && (
+            <WelcomeWizard
+              config={config}
+              onChange={setConfig}
+              onSave={saveConfig}
+              saving={savingConfig}
+              defaultDownloadsDir={diagnostics?.configuration?.downloads?.path}
+              spotifyAuth={spotifyAuth}
+              onStartSpotifyAuth={startSpotifyAuth}
+              onDone={() => {
+                localStorage.setItem('welcome_dismissed', '1')
+                setWelcomeDismissed(true)
+              }}
+            />
+          )
+        })()}
         <ToastContainer
           position="top-left"
           autoClose={6000}

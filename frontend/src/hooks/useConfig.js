@@ -7,11 +7,13 @@ const SECRET_FIELDS = ['spotify_client_secret', 'slskd_api_key', 'soulseek_passw
 export function useConfig() {
   const [config, setConfig] = useState({})
   const [savingConfig, setSavingConfig] = useState(false)
+  const [configLoaded, setConfigLoaded] = useState(false)
 
   useEffect(() => {
     requestJson('/api/config')
       .then((data) => setConfig(data))
       .catch(() => {})
+      .finally(() => setConfigLoaded(true))
   }, [])
 
   const saveConfig = useCallback(async () => {
@@ -35,5 +37,5 @@ export function useConfig() {
     }
   }, [config])
 
-  return { config, setConfig, saveConfig, savingConfig }
+  return { config, setConfig, saveConfig, savingConfig, configLoaded }
 }
