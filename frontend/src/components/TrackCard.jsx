@@ -35,6 +35,7 @@ export default function TrackCard({
   onSavePreview,
   onDiscardPreview,
   onCancelPreview,
+  onSaveSpotifyPreview,
   storedFileStreamUrl,
   storedFileUrl,
   onCancelDownload,
@@ -183,6 +184,10 @@ export default function TrackCard({
           previewUrl={t.spotify_preview}
           open={embedOpen}
           onToggle={onToggleEmbed}
+          trackName={t.track_name}
+          artists={t.artists}
+          localPlaylists={localPlaylists}
+          onSaveToLibrary={onSaveSpotifyPreview}
         />
       )}
 

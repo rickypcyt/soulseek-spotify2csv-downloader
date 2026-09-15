@@ -286,7 +286,7 @@ class LibraryService:
                     "album": album,
                     "path": rel,
                     "cover_url": cover_url,
-                    "cover_source_url": cover_url,
+                    "cover_source_url": "",
                 }
         return index
 

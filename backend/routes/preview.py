@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+import uuid
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from flask import Blueprint, abort, jsonify, request, send_file
+
+import requests
 
 from backend.database import set_playlist_track_status
 from backend.fs_utils import move_file_with_retry, remove_file_with_retry, safe_dirname, safe_join
@@ -81,6 +85,36 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         except Exception as e:
             state.logs.add(f"[web] Error: {e}")
             return jsonify({"error": str(e)}), 500
+
+    @bp.route("/api/spotify/preview/download", methods=["POST"])
+    def api_spotify_preview_download():
+        data = request.get_json() or {}
+        preview_url = str(data.get("preview_url", "")).strip()
+        parsed = urlparse(preview_url)
+        hostname = (parsed.hostname or "").lower()
+        allowed_host = (
+            hostname == "scdn.co" or hostname.endswith(".scdn.co")
+            or hostname == "spotifycdn.com" or hostname.endswith(".spotifycdn.com")
+        )
+        if parsed.scheme != "https" or not allowed_host:
+            return jsonify({"error": "URL de preview de Spotify inválida"}), 400
+        destination = os.path.join(state.previews_dir, f"spotify-preview-{uuid.uuid4().hex}.mp3")
+        try:
+            os.makedirs(state.previews_dir, exist_ok=True)
+            with requests.get(preview_url, stream=True, timeout=30) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as output:
+                    for chunk in response.iter_content(chunk_size=1024 * 256):
+                        if chunk:
+                            output.write(chunk)
+            return jsonify({"ok": True, "path": os.path.basename(destination)})
+        except Exception as exc:
+            try:
+                os.remove(destination)
+            except OSError:
+                pass
+            state.logs.add(f"[spotify] error descargando preview: {exc}")
+            return jsonify({"error": "No se pudo descargar el preview de Spotify"}), 502
 
     @bp.route("/api/preview_audio", methods=["POST"])
     def api_preview_audio():

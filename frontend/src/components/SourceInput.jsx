@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { FONT_MONO } from '../constants'
 
 export default function SourceInput({
@@ -12,7 +13,62 @@ export default function SourceInput({
   urlHistory,
   onSelectHistory,
   onClearHistory,
+  onDownloadCompleted,
 }) {
+  const [youtubeUrl, setYoutubeUrl] = useState('')
+  const [youtubeLoading, setYoutubeLoading] = useState(false)
+  const [youtubeMessage, setYoutubeMessage] = useState('')
+  const [soundcloudUrl, setSoundcloudUrl] = useState('')
+  const [soundcloudLoading, setSoundcloudLoading] = useState(false)
+  const [soundcloudMessage, setSoundcloudMessage] = useState('')
+
+  async function handleSoundCloudDownload(event) {
+    event.preventDefault()
+    if (!soundcloudUrl.trim()) return
+    setSoundcloudLoading(true)
+    setSoundcloudMessage('')
+    try {
+      const res = await fetch('/api/soundcloud/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: soundcloudUrl }),
+      })
+      const data = await res.json()
+      if (data.ok) onDownloadCompleted?.()
+      setSoundcloudMessage(data.ok ? `Preview descargado en FLAC: ${data.file}` : `Error: ${data.error}`)
+    } catch (error) {
+      setSoundcloudMessage('Error de red')
+    } finally {
+      setSoundcloudLoading(false)
+    }
+  }
+
+  async function handleYouTubeDownload(event) {
+    event.preventDefault()
+    if (!youtubeUrl.trim()) return
+    setYoutubeLoading(true)
+    setYoutubeMessage('')
+    try {
+      const res = await fetch('/api/youtube/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: youtubeUrl }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setYoutubeMessage(`Preview descargado en FLAC: ${data.file}`)
+        onDownloadCompleted?.()
+
+      } else {
+        setYoutubeMessage(`Error: ${data.error}`)
+      }
+    } catch (error) {
+      setYoutubeMessage('Error de red')
+    } finally {
+      setYoutubeLoading(false)
+    }
+  }
+
   return (
     <section className="mb-8 rounded-xl border border-slate-600 bg-slate-800 p-5 sm:p-6">
       <div className="mb-4">
@@ -99,6 +155,52 @@ export default function SourceInput({
           </div>
         </div>
       )}
+      <div className="mt-5 rounded-md border border-[#2C303D] bg-[#161822] p-3">
+        <div className="mb-2">
+          <p className="text-sm font-medium text-slate-100">SoundCloud · FLAC</p>
+          <p className="mt-1 text-xs text-slate-400">Descarga tracks con yt-dlp y playlists públicas con lucidadl.</p>
+        </div>
+        <form onSubmit={handleSoundCloudDownload} className="flex flex-col gap-3 sm:flex-row">
+          <input
+            type="text"
+            value={soundcloudUrl}
+            onChange={(e) => setSoundcloudUrl(e.target.value)}
+            placeholder="Pega un enlace de SoundCloud"
+            className="w-full rounded-md border border-[#2C303D] bg-[#161822] py-2.5 px-3 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
+            style={{ fontFamily: FONT_MONO }}
+          />
+          <button
+            type="submit"
+            disabled={soundcloudLoading}
+            className="whitespace-nowrap rounded-md bg-[#FFFFFF] px-5 py-2.5 text-sm font-medium text-[#161822] transition-colors hover:bg-[#f0b25c] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {soundcloudLoading ? 'Descargando…' : 'Descargar FLAC'}
+          </button>
+        </form>
+        {soundcloudMessage && <p className="mt-2 text-sm text-slate-300">{soundcloudMessage}</p>}
+      </div>
+      <div className="mt-5 rounded-md border border-[#2C303D] bg-[#161822] p-3">
+        <form onSubmit={handleYouTubeDownload} className="flex flex-col gap-3 sm:flex-row">
+          <input
+            type="text"
+            value={youtubeUrl}
+            onChange={(e) => setYoutubeUrl(e.target.value)}
+            placeholder="Pega un enlace de YouTube para descargar en FLAC"
+            className="w-full rounded-md border border-[#2C303D] bg-[#161822] py-2.5 px-3 text-sm text-[#E9EAF0] placeholder-[#565C6E] outline-none transition-colors focus:border-[#FFFFFF]/60"
+            style={{ fontFamily: FONT_MONO }}
+          />
+          <button
+            type="submit"
+            disabled={youtubeLoading}
+            className="whitespace-nowrap rounded-md bg-[#FFFFFF] px-5 py-2.5 text-sm font-medium text-[#161822] transition-colors hover:bg-[#f0b25c] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {youtubeLoading ? 'Descargando…' : 'Descargar FLAC'}
+          </button>
+        </form>
+        {youtubeMessage && (
+          <p className="mt-2 text-sm text-slate-300">{youtubeMessage}</p>
+        )}
+      </div>
     </section>
   )
 }

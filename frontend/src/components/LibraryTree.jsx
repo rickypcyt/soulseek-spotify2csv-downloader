@@ -23,6 +23,9 @@ export default function LibraryTree({
   onEmbedCover,
   onSearchCover,
   onRenameFile,
+  onConvertFlac,
+  onMoveToPlaylist,
+  movePlaylists = [],
   onRevealFile,
   bpmByPath,
   onSyncBpm,
@@ -106,6 +109,9 @@ export default function LibraryTree({
                 onEmbedCover={onEmbedCover}
                 onSearchCover={onSearchCover}
                 onRenameFile={onRenameFile}
+                onConvertFlac={onConvertFlac}
+                onMoveToPlaylist={onMoveToPlaylist}
+                movePlaylists={movePlaylists}
                 bpmByPath={bpmByPath}
                 onSyncBpm={onSyncBpm}
                 onUpdateBpm={onUpdateBpm}
@@ -130,6 +136,9 @@ export default function LibraryTree({
                 onEmbedCover={onEmbedCover}
                 onSearchCover={onSearchCover}
                 onRenameFile={onRenameFile}
+                onConvertFlac={onConvertFlac}
+                onMoveToPlaylist={onMoveToPlaylist}
+                movePlaylists={movePlaylists}
                 onRevealFile={onRevealFile}
                 bpm={bpmByPath?.[file.path] || null}
                 onSyncBpm={onSyncBpm}

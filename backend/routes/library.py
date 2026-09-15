@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import requests
 from flask import Blueprint, Response, jsonify, request
 
+from backend.audio_conversion import AudioConversionError, convert_to_flac
 from backend.fs_utils import move_file_with_retry, remove_file_with_retry, safe_dirname, safe_join
 from backend.library_service import embed_cover, extract_embedded_cover, write_audio_metadata, write_bpm
 
@@ -62,6 +63,24 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             return jsonify({"library_index": state.library.index()})
         except Exception as exc:
             return jsonify({"error": str(exc)}), 500
+
+    @bp.route("/api/library/convert-flac", methods=["POST"])
+    def api_library_convert_flac():
+        data = request.get_json() or {}
+        rel = str(data.get("path", "")).strip().lstrip("/\\")
+        if not rel:
+            return jsonify({"error": "Falta path"}), 400
+        try:
+            source = safe_join(state.current_downloads_dir, rel)
+            destination = convert_to_flac(source)
+            return jsonify({
+                "ok": True,
+                "path": os.path.relpath(destination, state.current_downloads_dir).replace("\\", "/"),
+            })
+        except ValueError:
+            return jsonify({"error": "Path inválido"}), 403
+        except AudioConversionError as exc:
+            return jsonify({"error": str(exc)}), 400
 
     @bp.route("/api/library/cover")
     def api_library_cover():

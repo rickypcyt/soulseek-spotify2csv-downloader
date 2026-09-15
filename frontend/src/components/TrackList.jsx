@@ -36,6 +36,7 @@ export default function TrackList({
   onSavePreview,
   onDiscardPreview,
   onCancelPreview,
+  onSaveSpotifyPreview,
   storedFileStreamUrl,
   storedFileUrl,
   onCancelDownload,
@@ -108,6 +109,7 @@ export default function TrackList({
         onSavePreview={onSavePreview}
         onDiscardPreview={onDiscardPreview}
         onCancelPreview={onCancelPreview}
+        onSaveSpotifyPreview={onSaveSpotifyPreview}
         storedFileStreamUrl={storedFileStreamUrl}
         storedFileUrl={storedFileUrl}
         onCancelDownload={onCancelDownload}

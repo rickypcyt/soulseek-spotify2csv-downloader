@@ -21,7 +21,7 @@ binaries = []
 hiddenimports = []
 
 # --- Third-party packages with dynamic imports / plugins ---
-for pkg in ("keyring", "spotipy", "mutagen", "requests"):
+for pkg in ("keyring", "spotipy", "mutagen", "requests", "lucidadl", "playwright", "httpx", "rich", "questionary", "pyjson5", "imageio_ffmpeg"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b

@@ -5,11 +5,14 @@ from __future__ import annotations
 import csv
 import os
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from flask import Blueprint, abort, jsonify, request, send_file
 
 from backend.database import register_download
+from backend.soundcloud_service import SoundCloudServiceError, download_soundcloud
+from backend.youtube_service import YouTubeServiceError, download_youtube_audio
 
 if TYPE_CHECKING:
     from backend.runtime import RuntimeState
@@ -93,5 +96,33 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         with open(txt_path, "w", encoding="utf-8") as f:
             f.writelines(row["search_query"] + "\n" for row in rows)
         return send_file(txt_path, as_attachment=True, download_name="soulseek_searches.txt")
+
+    @bp.route("/api/youtube/download", methods=["POST"])
+    def api_youtube_download():
+        data = request.get_json() or {}
+        url = str(data.get("url", "")).strip()
+        if not url:
+            return jsonify({"error": "falta url"}), 400
+        try:
+            output_path = download_youtube_audio(
+                url,
+                Path(state.previews_dir),
+                audio_format="flac",
+            )
+            return jsonify({"ok": True, "file": str(output_path)})
+        except YouTubeServiceError as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
+    @bp.route("/api/soundcloud/download", methods=["POST"])
+    def api_soundcloud_download():
+        data = request.get_json() or {}
+        url = str(data.get("url", "")).strip()
+        if not url:
+            return jsonify({"error": "falta url"}), 400
+        try:
+            output = download_soundcloud(url, Path(state.previews_dir))
+            return jsonify({"ok": True, "file": output})
+        except SoundCloudServiceError as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
     return bp

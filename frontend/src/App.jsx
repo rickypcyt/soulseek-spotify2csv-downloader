@@ -134,6 +134,23 @@ function App() {
     deleteItem, cleanupAll, cancelTransfer, saveTemporaryPreviewToLibrary, moveLibraryFile, renameLibraryFile, createLibraryFolder,
   } = useLibraryOps({ outputFolderName, fetchDiagnostics })
 
+  const saveSpotifyPreviewToLibrary = useCallback(async (preview, folderName) => {
+    try {
+      const data = await requestJson('/api/spotify/preview/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          preview_url: preview.previewUrl,
+          track_name: preview.trackName,
+          artists: preview.artists,
+        }),
+      })
+      await saveTemporaryPreviewToLibrary(data.path, folderName)
+    } catch (error) {
+      toast.error(`No se pudo guardar el preview de Spotify: ${error.message}`)
+    }
+  }, [saveTemporaryPreviewToLibrary])
+
   const embedCoverInFile = useCallback(async (path, coverUrl) => {
     try {
       const response = await request('/api/library/cover/embed', {
@@ -199,6 +216,20 @@ function App() {
       toast.success(`BPM ${data.bpm} guardado en el archivo`)
     } catch (error) {
       toast.error(`No se pudo guardar el BPM: ${error.message}`)
+    }
+  }, [fetchDiagnostics, fetchLibraryIndex])
+
+  const convertLibraryFileToFlac = useCallback(async (path) => {
+    try {
+      await requestJson('/api/library/convert-flac', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      })
+      await Promise.all([fetchDiagnostics(), fetchLibraryIndex()])
+      toast.success('Archivo convertido a FLAC')
+    } catch (error) {
+      toast.error(`No se pudo convertir a FLAC: ${error.message}`)
     }
   }, [fetchDiagnostics, fetchLibraryIndex])
 
@@ -581,6 +612,7 @@ function App() {
               urlHistory={urlHistory}
               onSelectHistory={selectHistory}
               onClearHistory={clearHistory}
+              onDownloadCompleted={fetchDiagnostics}
             />
             <PlaylistPicker
               open={playlistPickerOpen}
@@ -673,6 +705,7 @@ function App() {
               onSavePreview={savePreviewToLibrary}
               onDiscardPreview={discardActivePreview}
               onCancelPreview={cancelPreview}
+              onSaveSpotifyPreview={saveSpotifyPreviewToLibrary}
               storedFileStreamUrl={storedFileStreamUrl}
               storedFileUrl={storedFileUrl}
               onCancelDownload={cancelTrackDownload}
@@ -725,6 +758,9 @@ function App() {
                 onEmbedCover={embedCoverInFile}
                 onSearchCover={searchAndEmbedCover}
                 onRenameFile={renameLibraryFile}
+                onConvertFlac={convertLibraryFileToFlac}
+                movePlaylists={localPlaylists}
+                onMoveToPlaylist={(path, folder) => moveLibraryFile({ dir: 'downloads', path }, folder)}
                 onRevealFile={(path) => revealFile(path, 'downloads')}
                 bpmByPath={bpmByPath}
                 onSyncBpm={syncLibraryBpm}

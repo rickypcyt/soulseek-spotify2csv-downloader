@@ -18,7 +18,7 @@ function formatBitrate(bytes, durationSeconds) {
   return `${Math.round((Number(bytes) * 8) / durationSeconds / 1000)} kbps`
 }
 
-export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, downloadLabel = 'descargar', formatSize, onDelete, dragDir, onMoveStart, coverUrl, coverSourceUrl, onEmbedCover, onSearchCover, onRenameFile, onRevealFile, bpm, metadata = {}, onUpdateMetadata, onSearchMetadata, downloadPlaylists = [], layout = 'horizontal' }) {
+export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, downloadLabel = 'descargar', formatSize, onDelete, dragDir, onMoveStart, coverUrl, coverSourceUrl, onEmbedCover, onSearchCover, onRenameFile, onRevealFile, onConvertFlac, onMoveToPlaylist, movePlaylists = [], bpm, metadata = {}, onUpdateMetadata, onSearchMetadata, downloadPlaylists = [], layout = 'horizontal' }) {
   const audioRef = useRef(null)
   const [duration, setDuration] = useState(0)
   const [coverFailed, setCoverFailed] = useState(false)
@@ -26,6 +26,7 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
   const [editingMetadata, setEditingMetadata] = useState(false)
   const [metadataDraft, setMetadataDraft] = useState({ trackName: '', artists: '' })
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false)
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false)
   const [renamePreview, setRenamePreview] = useState(null)
   const isVertical = layout === 'vertical'
   const extension = (file.name.split('.').pop() || 'archivo').toUpperCase()
@@ -144,6 +145,25 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
     </button>
   ) : null
 
+  const convertFlacButton = onConvertFlac && ['m4a', 'mp4'].includes(extension.toLowerCase()) ? (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await onConvertFlac(file.path)
+        } catch (err) {
+          toast.error(`No se pudo convertir a FLAC: ${err.message}`)
+        }
+      }}
+      aria-label={`Convertir ${file.name} a FLAC`}
+      title="Convertir M4A a FLAC"
+      className="flex h-7 min-h-7 shrink-0 items-center gap-1 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[10px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
+    >
+      <FileDown size={13} strokeWidth={2} />
+      <span className="hidden xl:inline">a FLAC</span>
+    </button>
+  ) : null
+
   const metadataSearchButton = onSearchMetadata ? (
     <button
       type="button"
@@ -204,6 +224,41 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
       <button type="button" onClick={() => setEditingMetadata(false)} className="rounded border border-[#2C303D] px-2 py-1 text-[10px] text-[#8D93A6]">
         cancelar
       </button>
+    </div>
+  ) : null
+
+  const moveButton = onMoveToPlaylist && movePlaylists.length > 0 ? (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setMoveMenuOpen((open) => !open)}
+        aria-label={`Mover ${file.name} a otra playlist`}
+        title="Mover a otra playlist"
+        className="flex h-7 min-h-7 shrink-0 items-center gap-1 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[10px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
+      >
+        <FolderOpen size={13} strokeWidth={2} />
+        <span className="hidden xl:inline">mover</span>
+      </button>
+      {moveMenuOpen && (
+        <div className="absolute bottom-full left-0 z-[100] mb-1 max-h-60 min-w-52 overflow-hidden rounded-lg border border-[#343949] bg-[#161822] shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
+          <div className="border-b border-[#2C303D] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[#8D93A6]">mover a playlist</div>
+          <div className="max-h-48 overflow-y-auto p-1.5">
+            {movePlaylists.map((playlist) => (
+              <button
+                key={playlist}
+                type="button"
+                onClick={() => {
+                  setMoveMenuOpen(false)
+                  onMoveToPlaylist(file.path, playlist)
+                }}
+                className="block w-full rounded-md px-2.5 py-2 text-left text-xs text-[#E9EAF0] transition-colors hover:bg-[#FFFFFF]/10"
+              >
+                <span className="block truncate" title={playlist}>{playlist}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   ) : null
 
@@ -338,8 +393,10 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
         <div className="flex flex-wrap items-center gap-2">
           {coverButton}
           {metadataButton}
+          {convertFlacButton}
           {metadataSearchButton}
           {renameButton}
+          {moveButton}
           {revealButton}
           {downloadButton}
         </div>

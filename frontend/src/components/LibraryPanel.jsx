@@ -16,6 +16,9 @@ export default function LibraryPanel({
   onEmbedCover,
   onSearchCover,
   onRenameFile,
+  onConvertFlac,
+  onMoveToPlaylist,
+  movePlaylists = [],
   onRevealFile,
   bpmByPath,
   onSyncBpm,
@@ -136,6 +139,9 @@ export default function LibraryPanel({
               onEmbedCover={onEmbedCover}
               onSearchCover={onSearchCover}
               onRenameFile={onRenameFile}
+              onConvertFlac={onConvertFlac}
+              onMoveToPlaylist={onMoveToPlaylist}
+              movePlaylists={movePlaylists}
               onRevealFile={onRevealFile}
               bpmByPath={bpmByPath}
               onSyncBpm={onSyncBpm}

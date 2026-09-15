@@ -19,6 +19,18 @@ foreach ($f in @($RequirementsPath, $SpecPath)) {
 $RequiredPythonId = "Python.Python.3.13"
 $RequiredNodeId   = "OpenJS.NodeJS.LTS"
 
+function Stop-SoulseekProcesses {
+    $processes = @(Get-Process -Name "spotify2soulseek" -ErrorAction SilentlyContinue)
+    if ($processes.Count -eq 0) { return }
+    Write-Host "Cerrando instancias anteriores de spotify2soulseek..."
+    $processes | Stop-Process -Force -ErrorAction SilentlyContinue
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Get-Process -Name "spotify2soulseek" -ErrorAction SilentlyContinue)) { return }
+        Start-Sleep -Milliseconds 250
+    }
+    throw "No se pudo liberar $ExePath. Cierra spotify2soulseek.exe y vuelve a intentarlo."
+}
+
 function Assert-Winget {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         throw "winget no está disponible. Instala 'App Installer' desde la Microsoft Store " +
@@ -80,6 +92,10 @@ function Install-Node {
 }
 
 Install-Python313
+$pythonScripts = py -3.13 -c "import sysconfig; print(sysconfig.get_path('scripts'))"
+if ($LASTEXITCODE -eq 0 -and $pythonScripts) {
+    $env:Path = "$($pythonScripts.Trim());$env:Path"
+}
 
 $distDir = Join-Path $FrontendDir "dist"
 # Con -SkipBuild el frontend solo se compila si no existe un build previo.
@@ -130,9 +146,7 @@ if ($SkipBuild) {
     # Misma base de datos que el exe: los datos viven en dist/data.
     $env:SOULSEEK_DATA_DIR = Join-Path $Root "dist\data"
     Write-Host "Iniciando aplicación desde fuente (sin empaquetar)..."
-    Get-Process spotify2soulseek -ErrorAction SilentlyContinue |
-        Stop-Process -Force -PassThru |
-        Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    Stop-SoulseekProcesses
     Push-Location $Root
     try {
         py -3.13 -m backend.spotify_web
@@ -156,9 +170,7 @@ $needsBuild = $Force -or $sourceNewer -or -not (Test-Path $ExePath)
 if ($needsBuild) {
     # Si la app está corriendo, el exe está bloqueado y PyInstaller no puede
     # sobrescribirlo (WinError 5). La cerramos antes de empaquetar.
-    Get-Process spotify2soulseek -ErrorAction SilentlyContinue |
-        Stop-Process -Force -PassThru |
-        Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+    Stop-SoulseekProcesses
 
     $vendorSlskd = Join-Path $Root "vendor\slskd"
     $slskdExe = Get-ChildItem -Path $vendorSlskd -Filter "slskd.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -172,7 +184,7 @@ if ($needsBuild) {
     Write-Host "Empaquetando ejecutable..."
     Push-Location $Root
     try {
-        py -3.13 -m PyInstaller $SpecPath --noconfirm
+        py -3.13 -m PyInstaller $SpecPath --noconfirm --clean
         if ($LASTEXITCODE -ne 0) { throw "Falló PyInstaller." }
     } finally {
         Pop-Location
