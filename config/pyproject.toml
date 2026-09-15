@@ -1,10 +1,11 @@
+# Las rutas se resuelven relativas a este directorio (config/), de ahí los ../
 [tool.ruff]
 line-length = 120
-exclude = ["slskd-*", "slskr-*", "previews", "frontend"]
+exclude = ["../slskd-*", "../slskr-*", "../previews", "../frontend"]
 
 [tool.ruff.lint.per-file-ignores]
-"backend/*.py" = ["BLE001", "S110", "DTZ005"]
-"backend/routes/*.py" = ["BLE001", "S110"]
+"../backend/*.py" = ["BLE001", "S110", "DTZ005"]
+"../backend/routes/*.py" = ["BLE001", "S110"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["../tests"]

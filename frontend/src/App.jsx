@@ -376,8 +376,11 @@ function App() {
 
   const isTrackDownloaded = (track) => {
     const trackKey = getSpotifyTrackId(track.spotify_url)
-    if (trackKey && libraryIndex?.[trackKey]) return true
-    if (trackKey && diagnostics?.library_index?.[trackKey]) return true
+    // Búsqueda Soulseek de texto libre: track_name es el propio texto buscado,
+    // no un track real; el estado "descargada" solo aplica a tracks de Spotify.
+    if (!trackKey) return false
+    if (libraryIndex?.[trackKey]) return true
+    if (diagnostics?.library_index?.[trackKey]) return true
     return (diagnostics?.downloads || [])
       .filter(isLibraryFile)
       .some((file) => matchesLibraryFile(track, file))

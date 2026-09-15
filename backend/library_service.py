@@ -17,9 +17,6 @@ from mutagen.id3 import APIC, ID3, ID3NoHeaderError, TALB, TBPM, TIT2, TPE1
 from mutagen.mp4 import AtomDataType, MP4, MP4Cover
 
 from backend.database import (
-    get_library_index,
-)
-from backend.database import (
     move_library_path as _move_database_path,
 )
 from backend.database import (
@@ -239,32 +236,58 @@ class LibraryService:
         except Exception:
             return ""
 
-    def _sync_filesystem_tracks(self) -> None:
-        index = get_library_index()
-        known_paths = {str(entry.get("path", "")).replace("\\", "/") for entry in index.values()}
+    def _get_field(self, audio, *names) -> str:
+        if audio is None:
+            return ""
+        for name in names:
+            try:
+                value = audio.get(name)
+                if value is None:
+                    continue
+                if hasattr(value, "text"):
+                    value = value.text
+                if isinstance(value, list):
+                    value = value[0] if value else ""
+                text = str(value).strip()
+                if text:
+                    return text
+            except Exception:
+                continue
+        return ""
+
+    def index(self) -> dict[str, dict[str, str]]:
         root = self.state.current_downloads_dir
+        index: dict[str, dict[str, str]] = {}
         if not os.path.isdir(root):
-            return
+            return index
         for directory, _, names in os.walk(root):
             for name in names:
                 full = os.path.join(directory, name)
                 rel = os.path.relpath(full, root).replace("\\", "/")
                 if rel.split("/")[0].lower() in {"temp", ".incomplete"} or not is_audio_path(rel):
                     continue
-                if rel in known_paths:
-                    continue
-                stem = os.path.splitext(os.path.basename(rel))[0]
-                _register_database_track(f"file:{rel}", stem, "", rel, "")
-                known_paths.add(rel)
-
-    def index(self) -> dict[str, dict[str, str]]:
-        self._sync_filesystem_tracks()
-        index = get_library_index()
-        for entry in index.values():
-            path = entry.get("path", "")
-            entry["cover_source_url"] = entry.get("cover_url", "")
-            if is_audio_path(path):
-                entry["cover_url"] = f"/api/library/cover?path={quote(path, safe='')}"
+                try:
+                    audio = MutagenFile(full)
+                    title = self._get_field(audio, "TIT2", "TITLE", "\xa9nam")
+                    artist = self._get_field(audio, "TPE1", "ARTIST", "\xa9ART")
+                    album = self._get_field(audio, "TALB", "ALBUM", "\xa9alb")
+                except Exception:
+                    audio = None
+                    title = ""
+                    artist = ""
+                    album = ""
+                if not title:
+                    title = os.path.splitext(name)[0]
+                cover_url = f"/api/library/cover?path={quote(rel, safe='')}"
+                index[f"file:{rel}"] = {
+                    "track_key": f"file:{rel}",
+                    "track_name": title,
+                    "artists": artist,
+                    "album": album,
+                    "path": rel,
+                    "cover_url": cover_url,
+                    "cover_source_url": cover_url,
+                }
         return index
 
     def register_track(self, track_key, track_name, artists, path, cover_url="") -> None:

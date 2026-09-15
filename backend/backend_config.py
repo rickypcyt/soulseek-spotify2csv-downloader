@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.paths import app_root, data_dir, frontend_dist
+
 
 @dataclass(frozen=True)
 class BackendSettings:
@@ -22,20 +24,26 @@ class BackendSettings:
 
     @classmethod
     def from_environment(cls, script_dir: Path | None = None) -> "BackendSettings":
-        # Keep all project-relative paths anchored at the repository root, not backend/.
-        root = script_dir or Path(__file__).resolve().parent.parent
+        if script_dir is not None:
+            root = Path(script_dir)
+            dist = root / "frontend" / "dist"
+            data = root / "data"
+        else:
+            root = app_root()
+            dist = frontend_dist()
+            data = data_dir()
         default_downloads = Path.home() / "Music" / "Soulseek Downloads"
         downloads_dir = default_downloads
         return cls(
             script_dir=root,
-            dist_dir=root / "frontend" / "dist",
-            run_script=root / "run.ps1",
-            csv_output=root / "web_output.csv",
-            playlist_name_file=root / "web_playlist_name.txt",
+            dist_dir=dist,
+            run_script=root / "start.ps1",
+            csv_output=data / "web_output.csv",
+            playlist_name_file=data / "web_playlist_name.txt",
             previews_dir=downloads_dir / "temp",
             downloads_dir=downloads_dir,
-            config_file=root / "web_config.json",
-            logs_file=root / "web_logs.json",
+            config_file=data / "web_config.json",
+            logs_file=data / "web_logs.json",
             slskd_url="http://127.0.0.1:5030",
             slskd_key="",
         )

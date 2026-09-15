@@ -11,7 +11,6 @@ from urllib.parse import urlparse
 import requests
 from flask import Blueprint, Response, jsonify, request
 
-from backend import musicbrainz
 from backend.fs_utils import move_file_with_retry, remove_file_with_retry, safe_dirname, safe_join
 from backend.library_service import embed_cover, extract_embedded_cover, write_audio_metadata, write_bpm
 
@@ -36,16 +35,6 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
 
         return max(entries, key=_score)
 
-    def _search_metadata(query: str) -> dict[str, str]:
-        try:
-            return musicbrainz.search_track_metadata(query)
-        except Exception:
-            pass
-        try:
-            return state.spotify_auth.search_track_metadata(query)
-        except Exception:
-            raise RuntimeError("No se encontró el track en MusicBrainz ni en Spotify.")
-
     def metadata_for_file(rel: str) -> dict[str, str]:
         entry = _best_library_entry(rel)
         track_name = str(entry.get("track_name", "")).strip()
@@ -53,25 +42,18 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         track_key = str(entry.get("track_key", "")).strip()
         album = ""
         cover_url = ""
-        if (track_name or artists):
-            try:
-                mb = musicbrainz.search_track_metadata(f"{artists} {track_name}")
-                album = mb.get("album", "")
-                cover_url = mb.get("cover_url", "")
-            except Exception:
-                pass
-        if not (album and cover_url) and track_key and len(track_key) == 22 and ":" not in track_key:
+        if track_key and len(track_key) == 22 and ":" not in track_key:
             try:
                 spotify = state.spotify_auth.get_track_metadata(track_key)
-                album = album or spotify.get("album", "")
-                cover_url = cover_url or spotify.get("cover_url", "")
+                album = spotify.get("album", "")
+                cover_url = spotify.get("cover_url", "")
             except Exception:
                 pass
         if track_name or artists:
             return {"track_key": track_key, "track_name": track_name, "artists": artists, "album": album, "cover_url": cover_url}
         stem = os.path.splitext(os.path.basename(rel))[0].replace("_", " ")
         query = " ".join(part for part in re.split(r"\s+-\s+", stem, maxsplit=1) if part).strip()
-        return _search_metadata(query)
+        return state.spotify_auth.search_track_metadata(query)
 
     @bp.route("/api/library/index")
     def api_library_index():
@@ -155,19 +137,9 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             return jsonify({"error": "Path inválido"}), 403
         if not os.path.isfile(full):
             return jsonify({"error": "El archivo no existe"}), 404
-        def _search_cover(track_name: str, artists: str) -> str:
-            try:
-                return musicbrainz.search_cover(track_name, artists)
-            except Exception:
-                pass
-            try:
-                return state.spotify_auth.search_cover(track_name, artists)
-            except Exception:
-                raise RuntimeError("No se encontró una portada en MusicBrainz ni en Spotify.")
-
         try:
             metadata = metadata_for_file(rel)
-            cover_url = metadata.get("cover_url") or _search_cover(metadata["track_name"], metadata["artists"])
+            cover_url = metadata.get("cover_url") or state.spotify_auth.search_cover(metadata["track_name"], metadata["artists"])
             response = requests.get(cover_url, timeout=20)
             response.raise_for_status()
             image = response.content
@@ -225,7 +197,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         if not query:
             query = os.path.splitext(os.path.basename(rel))[0].replace("_", " ")
         try:
-            metadata = _search_metadata(query)
+            metadata = state.spotify_auth.search_track_metadata(query)
             write_audio_metadata(full, metadata["track_name"], metadata["artists"], metadata.get("album", ""))
             state.library.register_track(
                 metadata["track_key"], metadata["track_name"], metadata["artists"], rel, metadata.get("cover_url", "")

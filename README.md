@@ -6,6 +6,103 @@ El proyecto está diseñado para ejecutarse en el equipo del usuario. El backend
 
 > La aplicación no está afiliada a Spotify ni a Soulseek. Descarga y conserva únicamente contenido que tengas derecho a utilizar.
 
+## Instalación paso a paso (Windows)
+
+Solo necesitas Windows 10/11 con PowerShell y `winget` (App Installer, incluido en la mayoría de instalaciones de Windows). El script instala automáticamente Python 3.13, Node.js y `slskd` si faltan.
+
+### 1. Abrir una terminal
+
+Pulsa la tecla **Windows**, escribe `PowerShell` y pulsa **Enter**. No hace falta ejecutarla como administrador.
+
+### 2. Elegir dónde instalar
+
+Por ejemplo, en la carpeta Documentos:
+
+```powershell
+cd Documents
+```
+
+### 3. Descargar el proyecto
+
+Con `git` instalado:
+
+```powershell
+git clone https://github.com/rickypcyt/soulseek-spotify2csv-downloader.git
+cd soulseek-spotify2csv-downloader
+```
+
+Sin `git`, este bloque descarga el ZIP y lo descomprime (todo desde PowerShell):
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/rickypcyt/soulseek-spotify2csv-downloader/archive/refs/heads/main.zip" -OutFile "soulseek.zip"
+Expand-Archive soulseek.zip -DestinationPath .
+cd soulseek-spotify2csv-downloader-main
+```
+
+### 4. Ejecutar el script de inicio
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\start.ps1
+```
+
+`Set-ExecutionPolicy` solo es necesario en cada terminal nueva para permitir ejecutar el script.
+
+En la primera ejecución, `start.ps1`:
+
+1. Comprueba si existen Python 3.13 y Node.js; si faltan, pregunta si quieres instalarlos automáticamente con `winget`.
+2. Instala las dependencias de Python (`config/requirements.txt`) y del frontend (`npm install`).
+3. Compila el frontend con `npm run build`.
+4. Descarga `slskd` y lo empaqueta junto a la aplicación.
+5. Genera el ejecutable `dist\spotify2soulseek.exe` con PyInstaller.
+6. Inicia la aplicación.
+
+La primera vez puede tardar varios minutos (descargas y empaquetado). Las siguientes ejecuciones solo recompilan lo que haya cambiado.
+
+### 5. Qué debería pasar
+
+Al terminar, `spotify2soulseek.exe` abre una **consola con los logs** de la aplicación y el navegador se abre automáticamente en:
+
+```text
+http://127.0.0.1:5000/
+```
+
+**Cerrar la consola detiene el programa.** Cuando se ejecuta como `.exe`, los logs también se guardan en `data/spotify2soulseek.log` junto al ejecutable.
+
+Para volver a abrir la app más tarde puedes:
+
+- Ejecutar `.\start.ps1` otra vez, o
+- Hacer doble clic en `dist\spotify2soulseek.exe`.
+
+### 6. Configuración inicial
+
+Crea una aplicación en el [dashboard de Spotify Developer](https://developer.spotify.com/dashboard) y registra esta Redirect URI:
+
+```text
+http://127.0.0.1:8080/callback
+```
+
+Después, dentro de la aplicación, abre **Settings** y completa:
+
+- Spotify Client ID.
+- Spotify Client Secret.
+- Redirect URI.
+- Usuario de Soulseek.
+- Contraseña de Soulseek.
+- Carpeta local de descargas.
+
+La URL interna habitual de `slskd` es `http://127.0.0.1:5030`; su API key se genera y administra internamente, no hace falta editar `slskd.yml`.
+
+### Opciones del script
+
+```powershell
+.\start.ps1 -Force      # reinstala dependencias y reempaqueta el exe
+.\start.ps1 -Yes        # no pregunta antes de instalar con winget
+.\start.ps1 -SkipBuild  # salta el build y ejecuta desde fuente (misma db que el exe)
+```
+
+Con `-SkipBuild` no se compila el frontend ni se empaqueta: el backend corre directamente con `py -3.13 -m backend.spotify_web` y sirve el último `frontend/dist` disponible. Usa la misma base de datos que el exe (`dist/data`), así que la configuración y la biblioteca se comparten entre ambos modos. Si nunca se ha compilado el frontend, se compila una única vez.
+
 ## Por qué existe
 
 El objetivo del proyecto es resolver un flujo concreto:
@@ -78,94 +175,11 @@ Flask sirve el build de `frontend/dist` y registra los blueprints de la API. El 
 ## Requisitos
 
 - Windows 10/11.
-- Python 3.13 con el launcher `py` disponible.
-- Node.js LTS y `npm`.
 - PowerShell.
+- `winget` (App Installer) para que `start.ps1` instale automáticamente Python 3.13 y Node.js si faltan; también pueden instalarse manualmente.
+- `git` para clonar el repositorio (opcional: se puede descargar como ZIP).
 - Cuenta de Spotify Developer si se van a cargar playlists privadas o datos que requieran autorización.
 - Cuenta de Soulseek para realizar búsquedas y descargas.
-
-## Instalación y primer arranque
-
-### 1. Obtener el proyecto
-
-```powershell
-git clone https://github.com/rickypcyt/soulseek-spotify2csv-downloader.git
-cd soulseek-spotify2csv-downloader
-```
-
-También se puede descargar el repositorio como ZIP.
-
-### 2. Configurar Spotify Developer
-
-Crear una aplicación en:
-
-<https://developer.spotify.com/dashboard>
-
-Registrar esta Redirect URI:
-
-```text
-http://127.0.0.1:8080/callback
-```
-
-Guardar el Client ID y el Client Secret. Se introducen después desde la interfaz; no deben escribirse en el repositorio ni en el README.
-
-### 3. Ejecutar el setup
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\setup.ps1
-```
-
-`setup.ps1` realiza estas tareas:
-
-- Instala las dependencias Python de `requirements.txt`.
-- Instala las dependencias frontend mediante `npm install`.
-- Descarga y prepara la versión fijada de `slskd`.
-- Crea o actualiza `vendor/` y la configuración local.
-- Conserva la configuración existente cuando es posible.
-
-Para reinstalar forzadamente las dependencias y el binario:
-
-```powershell
-.\setup.ps1 -Force
-```
-
-### 4. Arrancar la aplicación
-
-```powershell
-.\run.ps1
-```
-
-`run.ps1` comprueba si existen `node_modules`, las dependencias Python y el ejecutable configurado de `slskd`. Si falta algún componente, ejecuta el setup automáticamente. Después:
-
-1. Compila React con `npm run build`.
-2. Inicia el backend con `python -m backend.spotify_web`.
-3. Inicia `slskd` desde la configuración local.
-4. Sirve la aplicación en:
-
-```text
-http://127.0.0.1:5000/
-```
-
-### 5. Configuración desde Settings
-
-La primera vez, abrir **Settings** y completar:
-
-- Spotify Client ID.
-- Spotify Client Secret.
-- Redirect URI.
-- Usuario de Soulseek.
-- Contraseña de Soulseek.
-- Ruta de `slskd.exe`, si no fue detectada automáticamente.
-- Carpeta local de descargas.
-
-La URL interna habitual de `slskd` es:
-
-```text
-http://127.0.0.1:5030
-```
-
-La API key de `slskd` se genera y administra internamente. No es necesario editar manualmente `slskd.yml` para el uso normal.
 
 ## Workflow técnico
 
@@ -299,10 +313,10 @@ Los formatos soportados para insertar artwork son MP3, FLAC, M4A/MP4 y OGG/Opus.
 
 ## Persistencia local
 
-La base de datos SQLite se encuentra en la raíz del proyecto:
+La base de datos SQLite y el resto de datos de runtime (config, logs, cachés) se guardan en la carpeta `data/` — en desarrollo bajo la raíz del repo y, cuando corre empaquetada, en `data/` junto al `.exe`:
 
 ```text
-soulseek.db
+data/soulseek.db
 ```
 
 Contiene datos no secretos como:
@@ -376,7 +390,11 @@ Build frontend:
 npm run build
 ```
 
-La configuración de pytest y Ruff está en `pyproject.toml`.
+La configuración de pytest y Ruff está en `config/pyproject.toml`. Como ya no está en la raíz, Ruff necesita la ruta explícita:
+
+```powershell
+ruff check --config config/pyproject.toml
+```
 
 ## Estructura relevante
 
@@ -403,14 +421,15 @@ frontend/
 └── src/utils/storage.js    # Preferencias y caché
 
 tests/                      # Tests Python
-setup.ps1                   # Instalación de dependencias y slskd
-run.ps1                     # Build y arranque local
-soulseek.db                 # Persistencia SQLite local
+config/                     # requirements.txt y pyproject.toml
+packaging/soulseek.spec     # Configuración de PyInstaller
+data/                       # Datos de runtime (soulseek.db, config, logs)
+start.ps1                   # Instalación, build, empaquetado y arranque
 ```
 
 ## Seguridad y responsabilidad
 
-- No publicar `web_config.json`, `soulseek.db` ni ningún archivo de secretos.
+- No publicar la carpeta `data/` (`web_config.json`, `soulseek.db`) ni ningún archivo de secretos.
 - No exponer Flask directamente a Internet.
 - Utilizar HTTPS, VPN o una red privada si se habilita acceso remoto.
 - Mantener la API key de `slskd` protegida.

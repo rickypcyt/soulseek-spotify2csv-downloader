@@ -90,8 +90,8 @@ class SlskdClient:
         environment = os.environ.copy()
         environment.update(
             {
-                "SLSKD_SLSK_USERNAME": self.state.config_store.get_secret("soulseek_username"),
-                "SLSKD_SLSK_PASSWORD": self.state.config_store.get_secret("soulseek_password"),
+                "SLSKD_SLSK_USERNAME": self.state.config_store.get_secret("soulseek_username") or "",
+                "SLSKD_SLSK_PASSWORD": self.state.config_store.get_secret("soulseek_password") or "",
                 "SLSKD__WEB__HTTPS__DISABLED": "true",
                 "SLSKD__WEB__CONTENT_PATH": webroot_dir,
                 "SLSKD_NO_HTTPS": "true",
@@ -108,6 +108,16 @@ class SlskdClient:
         )
         self.state.logs.add("[slskd] Servicio iniciado desde la configuración local")
         return True
+
+    def stop(self) -> None:
+        if not self.process or self.process.poll() is not None:
+            return
+        self.process.terminate()
+        try:
+            self.process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
 
     def ensure_available(self, wait_seconds: float = 8) -> bool:
         """Start the configured slskd and wait briefly for its HTTP API to listen."""
@@ -206,12 +216,14 @@ class SlskdClient:
             return {"error": message, "status": "unavailable"}, 503
         # Cola de búsquedas: esperar a que haya un slot libre.
         self._prune_active_searches()
+        search_id = str(uuid.uuid4())
         with self._search_slot:
             while len(self.active_search_ids) >= MAX_ACTIVE_SEARCHES:
                 if not self._search_slot.wait(timeout=SEARCH_QUEUE_TIMEOUT_SECONDS):
                     self.state.logs.add("[slskd] Tiempo de espera agotado en la cola de búsquedas")
                     return {"error": "Tiempo de espera agotado esperando un slot de búsqueda"}, 503
-        search_id = str(uuid.uuid4())
+            self.active_search_ids.add(search_id)
+            self.active_search_started[search_id] = time.monotonic()
         try:
             response = requests.post(
                 f"{self.url}/api/v0/searches",
@@ -220,22 +232,27 @@ class SlskdClient:
                 timeout=10,
             )
         except requests.RequestException as exc:
+            self.active_search_ids.discard(search_id)
+            self.active_search_started.pop(search_id, None)
             self.state.logs.add(f"[slskd] Error de conexión: {exc}")
             return {"error": f"Error de conexión: {exc}"}, 500
         try:
             data = response.json()
             self.state.logs.add(f"[slskd] {response.status_code}: {data}")
             if not response.ok:
+                self.active_search_ids.discard(search_id)
+                self.active_search_started.pop(search_id, None)
                 return {"error": f"Error {response.status_code}", "details": data}, response.status_code
             data = self.normalize_search(data)
-            self.active_search_ids.add(data["searchId"])
-            self.active_search_started[data["searchId"]] = time.monotonic()
+            data["searchId"] = search_id
             return {
-                "searchId": data["searchId"],
+                "searchId": search_id,
                 "query": data["query"],
                 "resultsCount": data["resultsCount"],
             }, 200
         except Exception:
+            self.active_search_ids.discard(search_id)
+            self.active_search_started.pop(search_id, None)
             text = response.text
             self.state.logs.add(f"[slskd] {response.status_code}: {text[:500]}")
             return {"error": f"Error {response.status_code}: {text[:500]}"}, response.status_code
@@ -400,20 +417,21 @@ class SlskdClient:
             return {"state": "Unknown", "percentComplete": 0}
         data = response.json()
         details: dict[str, Any] = {"state": "Unknown", "percentComplete": 0}
+        found = False
         for directory in data.get("directories", []):
             for file_data in directory.get("files", []):
                 if file_data.get("filename") == filename or (file_data.get("filename") or "").endswith(filename):
                     for key in ("state", "percentComplete", "bytesRemaining", "bytesTransferred", "averageSpeed", "currentSpeed"):
                         if key in file_data:
                             details[key] = file_data[key]
+                    found = True
                     break
-            if details["state"] != "Unknown":
+            if found:
                 break
         return details
 
     def preview_status(self, username: str, filename: str) -> dict[str, Any]:
         transfer = self._find_transfer(username, filename)
-        target_state = transfer.get("state", "Unknown")
         base = os.path.basename(filename.replace("\\", "/").replace("/", os.sep))
         matches = glob.glob(os.path.join(self.state.previews_dir, "**", glob.escape(base)), recursive=True)
         if matches:
@@ -452,7 +470,10 @@ class SlskdClient:
             folder_name = requested_folder or pending_folder
         else:
             folder_name = requested_folder or playlist_name
-        is_in_previews = os.path.commonpath([latest_abs, previews_abs]) == previews_abs
+        try:
+            is_in_previews = os.path.commonpath([latest_abs, previews_abs]) == previews_abs
+        except ValueError:
+            is_in_previews = False
         if is_in_previews and folder_name:
             target_dir = os.path.join(self.state.current_downloads_dir, safe_dirname(folder_name))
             self.state.logs.add(f"[library] destino de descarga: {target_dir}")

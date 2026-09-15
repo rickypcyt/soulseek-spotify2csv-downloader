@@ -9,6 +9,7 @@ node_modules/
 dist/
 
 previews/
+data/
 *.csv
 *_playlist_name.txt
 *_soulseek.txt
@@ -29,3 +30,7 @@ soulseek_searches.txt
 vendor/
 .setup-cache/
 .cache
+
+# PyInstaller build artifacts
+build/
+dist/soulseek.exe

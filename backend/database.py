@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SERVICE_DIR = Path(__file__).resolve().parent.parent
+from backend.paths import data_dir
+
+SERVICE_DIR = data_dir()
 DB_PATH = SERVICE_DIR / "soulseek.db"
 
 

@@ -5,3 +5,4 @@ keyring>=25,<26
 mutagen>=1.47,<2
 pytest>=8,<9
 ruff>=0.8,<1
+pyinstaller>=6.10,<7
