@@ -443,7 +443,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             if os.path.isdir(full):
                 shutil.rmtree(full)
             else:
-                os.remove(full)
+                remove_file_with_retry(full)
             if dir_key == "downloads":
                 state.library.remove_paths(rel)
             return jsonify({"ok": True})

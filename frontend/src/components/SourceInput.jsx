@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { FONT_MONO } from '../constants'
+import { FONT_MONO, formatSize } from '../constants'
+import LibraryAudioCard from './LibraryAudioCard'
 
 export default function SourceInput({
   url,
@@ -14,6 +15,14 @@ export default function SourceInput({
   onSelectHistory,
   onClearHistory,
   onDownloadCompleted,
+  localPlaylists = [],
+  quickSaveLabel = '',
+  onQuickSaveTemp,
+  onSaveTemp,
+  onDeleteTemp,
+  storedFileStreamUrl,
+  storedFileUrl,
+  onRevealFile,
 }) {
   const [youtubeUrl, setYoutubeUrl] = useState('')
   const [youtubeLoading, setYoutubeLoading] = useState(false)
@@ -21,6 +30,7 @@ export default function SourceInput({
   const [soundcloudUrl, setSoundcloudUrl] = useState('')
   const [soundcloudLoading, setSoundcloudLoading] = useState(false)
   const [soundcloudMessage, setSoundcloudMessage] = useState('')
+  const [downloadedPreview, setDownloadedPreview] = useState(null) // { path, name }
 
   async function handleSoundCloudDownload(event) {
     event.preventDefault()
@@ -34,8 +44,11 @@ export default function SourceInput({
         body: JSON.stringify({ url: soundcloudUrl }),
       })
       const data = await res.json()
-      if (data.ok) onDownloadCompleted?.()
-      setSoundcloudMessage(data.ok ? `Preview descargado en FLAC: ${data.file}` : `Error: ${data.error}`)
+      if (data.ok) {
+        if (data.rel) setDownloadedPreview({ path: data.rel, name: data.rel.split('/').pop() })
+        onDownloadCompleted?.()
+      }
+      setSoundcloudMessage(data.ok ? `Preview descargado: ${data.rel || data.file}` : `Error: ${data.error}`)
     } catch (error) {
       setSoundcloudMessage('Error de red')
     } finally {
@@ -56,7 +69,8 @@ export default function SourceInput({
       })
       const data = await res.json()
       if (data.ok) {
-        setYoutubeMessage(`Preview descargado en FLAC: ${data.file}`)
+        if (data.rel) setDownloadedPreview({ path: data.rel, name: data.rel.split('/').pop() })
+        setYoutubeMessage(`Preview descargado: ${data.rel || data.file}`)
         onDownloadCompleted?.()
 
       } else {
@@ -201,6 +215,36 @@ export default function SourceInput({
           <p className="mt-2 text-sm text-slate-300">{youtubeMessage}</p>
         )}
       </div>
+      {downloadedPreview && (
+        <div className="mt-5 rounded-md border border-[#2C303D] bg-[#161822] p-3">
+          <p className="mb-2 text-xs text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>descargado · temporal</p>
+          <LibraryAudioCard
+            file={downloadedPreview}
+            streamUrl={storedFileStreamUrl?.('previews', downloadedPreview.path)}
+            coverUrl={`/api/library/cover?dir=previews&path=${encodeURIComponent(downloadedPreview.path)}`}
+            onDownload={async (path, playlist) => {
+              const ok = await onSaveTemp?.(path, playlist)
+              if (ok !== false) setDownloadedPreview(null)
+            }}
+            quickSaveLabel={quickSaveLabel}
+            onQuickSave={async (path) => {
+              const ok = await onQuickSaveTemp?.(path)
+              if (ok !== false) setDownloadedPreview(null)
+            }}
+            downloadPlaylists={localPlaylists}
+            downloadLabel="guardar en otra carpeta"
+            downloadUrl={storedFileUrl?.('previews', downloadedPreview.path)}
+            onRevealFile={onRevealFile ? (path) => onRevealFile(path, 'previews') : undefined}
+            formatSize={formatSize}
+            onDelete={(path) => {
+              if (confirm(`¿Borrar ${path}?`)) {
+                onDeleteTemp?.(path)
+                setDownloadedPreview(null)
+              }
+            }}
+          />
+        </div>
+      )}
     </section>
   )
 }

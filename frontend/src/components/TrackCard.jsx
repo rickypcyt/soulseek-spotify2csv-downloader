@@ -33,6 +33,8 @@ export default function TrackCard({
   previews,
   onStartPreview,
   onSavePreview,
+  quickSaveLabel,
+  onQuickSavePreview,
   onDiscardPreview,
   onCancelPreview,
   onSaveSpotifyPreview,
@@ -239,6 +241,8 @@ export default function TrackCard({
             formatFilters={formatFilters}
             onStartPreview={(res, folderName) => onStartPreview(res, i, folderName)}
             onSavePreview={onSavePreview}
+            quickSaveLabel={quickSaveLabel}
+            onQuickSavePreview={onQuickSavePreview}
             onDiscardPreview={onDiscardPreview}
             onCancelPreview={onCancelPreview}
             storedFileStreamUrl={storedFileStreamUrl}

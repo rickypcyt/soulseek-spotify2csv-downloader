@@ -8,6 +8,7 @@ import ConfigurationStatus from './components/ConfigurationStatus'
 import LibraryPanel from './components/LibraryPanel'
 import LogsPanel from './components/LogsPanel'
 import PlaylistPicker from './components/PlaylistPicker'
+import PlaylistSelectModal from './components/PlaylistSelectModal'
 import RecommendConfig from './components/RecommendConfig'
 import SettingsPanel from './components/SettingsPanel'
 import SourceInput from './components/SourceInput'
@@ -53,6 +54,13 @@ function App() {
   const [urlHistory, setUrlHistory] = useState([])
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
+  const [currentPlaylistName, setCurrentPlaylistName] = useState('')
+  // Carpeta elegida manualmente para una playlist (override del nombre).
+  const [folderOverrides, setFolderOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('playlist_folder_overrides') || '{}') } catch { return {} }
+  })
+  const [missingFolder, setMissingFolder] = useState(null)   // { save, folder, playlistName }
+  const [relocateFolder, setRelocateFolder] = useState(null) // { save, playlistName }
   const [previewPage, setPreviewPage] = useState(1)
   const [completedTransfersOpen, setCompletedTransfersOpen] = useState(false)
   const [pickMode, setPickMode] = useState('quality')
@@ -75,6 +83,7 @@ function App() {
       if (cancelled) return
       setInitialPlaylist(playlist)
       setUrl(playlist.url || '')
+      setCurrentPlaylistName(playlist.playlist_name || '')
       if (cancelled) return
       setOutputFolderName('')
       setTracks(playlist.tracks || [])
@@ -283,9 +292,9 @@ function App() {
   // Guardar playlist actual cuando cambia
   useEffect(() => {
     if (url && tracks.length > 0) {
-      saveLastPlaylist({ url, tracks, outputFolderName })
+      saveLastPlaylist({ url, tracks, outputFolderName, playlist_name: currentPlaylistName })
     }
-  }, [url, tracks, outputFolderName])
+  }, [url, tracks, outputFolderName, currentPlaylistName])
 
   useEffect(() => {
     if (!url) return undefined
@@ -336,6 +345,7 @@ function App() {
       const data = await r.json()
       if (!r.ok) throw new Error(data.error || 'Error')
       const loaded = data.tracks || []
+      setCurrentPlaylistName(data.source === 'spotify' ? (data.playlist_name || '') : '')
       const cachedSearches = await loadSearchCache(targetUrl, loaded)
       setSearches(cachedSearches)
       setTracks(loaded)
@@ -511,6 +521,52 @@ function App() {
     ...libraryFolders,
     ...libraryFiles.map((file) => file.path),
   ].map((path) => String(path).split('/').filter(Boolean)[0]).filter((name) => name && !['temp', '.incomplete'].includes(name.toLowerCase())))].sort((a, b) => a.localeCompare(b))
+
+  // Guardado rápido: la playlist cargada tiene una carpeta destino (su propio
+  // nombre o la carpeta que el usuario ubicó manualmente para ella).
+  const quickSaveFolder = currentPlaylistName
+    ? (folderOverrides[currentPlaylistName] || currentPlaylistName)
+    : ''
+
+  const rememberFolderOverride = (playlistName, folder) => {
+    setFolderOverrides((current) => {
+      const next = { ...current, [playlistName]: folder }
+      try { localStorage.setItem('playlist_folder_overrides', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+
+  const quickSavePreview = (preview) => {
+    if (!quickSaveFolder) return
+    // La carpeta puede existir con distinto case (Windows no distingue).
+    const existing = localPlaylists.find(
+      (name) => name.toLowerCase() === quickSaveFolder.toLowerCase()
+    )
+    if (existing) {
+      savePreviewToLibrary(preview, existing)
+    } else {
+      setMissingFolder({
+        save: (folder) => savePreviewToLibrary(preview, folder),
+        folder: quickSaveFolder,
+        playlistName: currentPlaylistName,
+      })
+    }
+  }
+
+  // Mismo guardado rápido para archivos temporales (previews, YouTube, SoundCloud).
+  const quickSaveTempFile = (path) => {
+    if (!quickSaveFolder) return false
+    const existing = localPlaylists.find(
+      (name) => name.toLowerCase() === quickSaveFolder.toLowerCase()
+    )
+    if (existing) return saveTemporaryPreviewToLibrary(path, existing)
+    setMissingFolder({
+      save: (folder) => saveTemporaryPreviewToLibrary(path, folder),
+      folder: quickSaveFolder,
+      playlistName: currentPlaylistName,
+    })
+    return true
+  }
   const coverByPath = useMemo(() => {
     const map = {}
     if (libraryIndex) {
@@ -613,6 +669,14 @@ function App() {
               onSelectHistory={selectHistory}
               onClearHistory={clearHistory}
               onDownloadCompleted={fetchDiagnostics}
+              localPlaylists={localPlaylists}
+              quickSaveLabel={quickSaveFolder}
+              onQuickSaveTemp={quickSaveTempFile}
+              onSaveTemp={saveTemporaryPreviewToLibrary}
+              onDeleteTemp={(path) => deleteItem(path, 'previews')}
+              storedFileStreamUrl={storedFileStreamUrl}
+              storedFileUrl={storedFileUrl}
+              onRevealFile={(path) => revealFile(path, 'previews')}
             />
             <PlaylistPicker
               open={playlistPickerOpen}
@@ -703,6 +767,8 @@ function App() {
               previews={previews}
               onStartPreview={startPreview}
               onSavePreview={savePreviewToLibrary}
+              quickSaveLabel={quickSaveFolder}
+              onQuickSavePreview={quickSavePreview}
               onDiscardPreview={discardActivePreview}
               onCancelPreview={cancelPreview}
               onSaveSpotifyPreview={saveSpotifyPreviewToLibrary}
@@ -732,6 +798,8 @@ function App() {
                 onPreviewPageChange={setPreviewPage}
                 storedFileStreamUrl={storedFileStreamUrl}
                 onSaveTemporaryPreview={saveTemporaryPreviewToLibrary}
+                quickSaveLabel={quickSaveFolder}
+                onQuickSave={quickSaveTempFile}
                 localPlaylists={localPlaylists}
                 onSearchCover={(path) => searchAndEmbedCover(path, 'previews')}
                 onRevealFile={(path) => revealFile(path, 'previews')}
@@ -778,6 +846,72 @@ function App() {
           </div>
         </div>
         <AppFooter />
+        {missingFolder && (
+          <div
+            className="fixed inset-0 z-[280] flex items-center justify-center bg-[#000000]/70 p-4 backdrop-blur-sm"
+            onClick={() => setMissingFolder(null)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="w-full max-w-md rounded-xl border border-[#2C303D] bg-[#12141D] p-5 shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <h3 className="text-sm font-semibold text-[#E9EAF0]">
+                No encontré la carpeta “{missingFolder.folder}”
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-[#8D93A6]">
+                La playlist “{missingFolder.playlistName}” todavía no tiene carpeta en la biblioteca.
+                Podés crearla ahora o ubicar una existente — si ubicás otra, el botón
+                “guardar” de esta playlist va a usar siempre esa carpeta.
+              </p>
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMissingFolder(null)}
+                  className="rounded-full border border-[#3A3F4E] px-4 py-1.5 text-xs font-medium text-[#D5D7DE] transition-colors hover:border-[#FFFFFF]/50 hover:text-[#FFFFFF]"
+                >
+                  cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRelocateFolder({ save: missingFolder.save, playlistName: missingFolder.playlistName })
+                    setMissingFolder(null)
+                  }}
+                  className="rounded-full border border-[#3A3F4E] px-4 py-1.5 text-xs font-medium text-[#D5D7DE] transition-colors hover:border-[#FFFFFF]/50 hover:text-[#FFFFFF]"
+                >
+                  elegir otra carpeta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    missingFolder.save(missingFolder.folder)
+                    setMissingFolder(null)
+                  }}
+                  className="rounded-full bg-[#1DB954] px-4 py-1.5 text-xs font-semibold text-[#0D0F16] transition-colors hover:bg-[#1ed760]"
+                >
+                  crear y guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <PlaylistSelectModal
+          open={Boolean(relocateFolder)}
+          playlists={localPlaylists}
+          title="Elegir carpeta destino"
+          subtitle={relocateFolder ? `Para la playlist “${relocateFolder.playlistName}”` : ''}
+          allowEmpty={false}
+          onClose={() => setRelocateFolder(null)}
+          onSelect={(playlist) => {
+            if (relocateFolder && playlist) {
+              rememberFolderOverride(relocateFolder.playlistName, playlist)
+              relocateFolder.save(playlist)
+            }
+            setRelocateFolder(null)
+          }}
+        />
         {(() => {
           const setupIncomplete = !config.downloads_dir || !config.soulseek_username ||
             !config.spotify_client_id || !config.spotify_client_secret_configured

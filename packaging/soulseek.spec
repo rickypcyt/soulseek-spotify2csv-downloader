@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the Spotify → Soulseek desktop app.
+r"""PyInstaller spec for the Spotify → Soulseek desktop app.
 
 Build with:  pyinstaller packaging/soulseek.spec
 Or via:      .\start.ps1

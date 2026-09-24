@@ -52,7 +52,7 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
     const targetFolder = folderName.trim() || outputFolderName.trim()
     if (!targetFolder) {
       toast.info('Escribe una carpeta de playlist para mover el preview')
-      return
+      return false
     }
     try {
       await requestJson('/api/preview/save', {
@@ -62,8 +62,10 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
       })
       await fetchDiagnostics()
       toast.success('Preview movido a la biblioteca')
+      return true
     } catch (err) {
       toast.error('No se pudo mover a la biblioteca: ' + err.message)
+      return false
     }
   }, [outputFolderName, fetchDiagnostics])
 

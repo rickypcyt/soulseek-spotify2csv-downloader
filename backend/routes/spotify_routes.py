@@ -21,7 +21,8 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
 
     @bp.route("/api/spotify/auth/start", methods=["POST"])
     def api_spotify_auth_start():
-        body, status = state.spotify_auth.start()
+        data = request.get_json(silent=True) or {}
+        body, status = state.spotify_auth.start(force=bool(data.get("force")))
         return jsonify(body), status
 
     @bp.route("/api/spotify/playlists")

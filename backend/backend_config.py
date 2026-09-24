@@ -39,7 +39,7 @@ class BackendSettings:
             dist_dir=dist,
             run_script=root / "start.ps1",
             csv_output=data / "web_output.csv",
-            playlist_name_file=data / "web_playlist_name.txt",
+            playlist_name_file=data / "web_output_playlist_name.txt",
             previews_dir=downloads_dir / "temp",
             downloads_dir=downloads_dir,
             config_file=data / "web_config.json",

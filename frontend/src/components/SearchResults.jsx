@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Clock3 } from 'lucide-react'
 import { requestJson } from '../api/client'
 import { Chip } from './ui'
+import PlaylistSelectModal from './PlaylistSelectModal'
 import SearchActions from './SearchActions'
 import { FONT_MONO, RESULTS_PER_TRACK, formatResultDuration, formatSize, formatSpeed } from '../constants'
 import { extOf, pickBest, rankResults } from '../utils/resultPicker'
@@ -55,6 +56,8 @@ export default function SearchResults({
   previews = {},
   onStartPreview,
   onSavePreview,
+  quickSaveLabel,
+  onQuickSavePreview,
   onDiscardPreview,
   onCancelPreview,
   storedFileStreamUrl,
@@ -246,50 +249,58 @@ export default function SearchResults({
                     className="mt-1 h-8 w-full"
                   />
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <div className="relative">
+                    {quickSaveLabel && !activePreview.savedPath && (
                       <button
                         onClick={() => {
-                          if (localPlaylists.length > 0 && !activePreview.savedPath) {
-                            setOpenSavePlaylistMenu((current) => current === activePreview.filename ? null : activePreview.filename)
-                          } else {
-                            audioRef.current?.pause()
-                            audioRef.current?.removeAttribute('src')
-                            audioRef.current?.load()
-                            onSavePreview(activePreview)
-                          }
+                          audioRef.current?.pause()
+                          audioRef.current?.removeAttribute('src')
+                          audioRef.current?.load()
+                          onQuickSavePreview(activePreview)
                         }}
-                        disabled={Boolean(activePreview.savedPath)}
-                        className="rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10 disabled:cursor-default disabled:opacity-60"
+                        title={`Guardar directo en la carpeta “${quickSaveLabel}”`}
+                        className="max-w-56 truncate rounded border border-[#1DB954]/50 px-2 py-1 text-[11px] font-medium text-[#1DB954] transition-colors hover:bg-[#1DB954]/10"
                       >
-                        {activePreview.savedPath ? 'Guardado en biblioteca' : 'Guardar en biblioteca'}
+                        Guardar en {quickSaveLabel}
                       </button>
-                      {openSavePlaylistMenu === activePreview.filename && (
-                        <div className="absolute left-0 bottom-full z-[100] mb-1 max-h-60 min-w-52 overflow-hidden rounded-lg border border-[#343949] bg-[#161822] shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
-                          <div className="border-b border-[#2C303D] bg-[#161822] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[#8D93A6]">elegir playlist</div>
-                          <div className="max-h-48 overflow-y-auto p-1.5">
-                            {localPlaylists.map((playlist) => (
-                              <button
-                                key={playlist}
-                                type="button"
-                                onClick={() => {
-                                  audioRef.current?.pause()
-                                  audioRef.current?.removeAttribute('src')
-                                  audioRef.current?.load()
-                                  setOpenSavePlaylistMenu(null)
-                                  onSavePreview(activePreview, playlist)
-                                }}
-                                className="block w-full rounded-md px-2.5 py-2 text-left text-xs text-[#E9EAF0] transition-colors hover:bg-[#FFFFFF]/10"
-                              >
-                                <span className="block truncate" title={playlist}>{playlist}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (localPlaylists.length > 0 && !activePreview.savedPath) {
+                          setOpenSavePlaylistMenu(activePreview.filename)
+                        } else {
+                          audioRef.current?.pause()
+                          audioRef.current?.removeAttribute('src')
+                          audioRef.current?.load()
+                          onSavePreview(activePreview)
+                        }
+                      }}
+                      disabled={Boolean(activePreview.savedPath)}
+                      className="rounded border border-[#FFFFFF]/40 px-2 py-1 text-[11px] font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10 disabled:cursor-default disabled:opacity-60"
+                    >
+                      {activePreview.savedPath ? 'Guardado en biblioteca' : 'guardar en otra carpeta'}
+                    </button>
+                    <PlaylistSelectModal
+                      open={openSavePlaylistMenu === activePreview.filename}
+                      playlists={localPlaylists}
+                      subtitle={activePreview.filename}
+                      onClose={() => setOpenSavePlaylistMenu(null)}
+                      onSelect={(playlist) => {
+                        audioRef.current?.pause()
+                        audioRef.current?.removeAttribute('src')
+                        audioRef.current?.load()
+                        setOpenSavePlaylistMenu(null)
+                        if (playlist) onSavePreview(activePreview, playlist)
+                        else onSavePreview(activePreview)
+                      }}
+                    />
                     {!activePreview.savedPath && (
                       <button
-                        onClick={() => onDiscardPreview(activePreview)}
+                        onClick={() => {
+                          audioRef.current?.pause()
+                          audioRef.current?.removeAttribute('src')
+                          audioRef.current?.load()
+                          onDiscardPreview(activePreview)
+                        }}
                         className="rounded border border-[#6B7280]/40 px-2 py-1 text-[11px] text-[#8D93A6] transition-colors hover:border-[#6B7280] hover:text-[#E9EAF0]"
                       >
                         descartar archivo

@@ -109,7 +109,8 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                 Path(state.previews_dir),
                 audio_format="flac",
             )
-            return jsonify({"ok": True, "file": str(output_path)})
+            rel = os.path.relpath(str(output_path), state.previews_dir).replace("\\", "/")
+            return jsonify({"ok": True, "file": str(output_path), "rel": rel})
         except YouTubeServiceError as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -121,7 +122,12 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             return jsonify({"error": "falta url"}), 400
         try:
             output = download_soundcloud(url, Path(state.previews_dir))
-            return jsonify({"ok": True, "file": output})
+            rel = (
+                os.path.relpath(output, state.previews_dir).replace("\\", "/")
+                if os.path.isfile(output)
+                else None
+            )
+            return jsonify({"ok": True, "file": output, "rel": rel})
         except SoundCloudServiceError as e:
             return jsonify({"ok": False, "error": str(e)}), 500
 

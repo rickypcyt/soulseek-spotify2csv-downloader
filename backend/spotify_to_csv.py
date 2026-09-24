@@ -56,7 +56,8 @@ class LocalSpotifyOAuth(SpotifyOAuth):
     def _get_auth_response_local_server(self, redirect_port):
         server = start_local_http_server(redirect_port, handler=CloseableCallbackHandler)
         self._open_auth_url()
-        server.handle_request()
+        while server.auth_code is None and server.error is None:
+            server.handle_request()
 
         if server.error is not None:
             raise server.error

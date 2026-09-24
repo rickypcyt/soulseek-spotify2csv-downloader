@@ -18,6 +18,8 @@ export default function TemporalesPanel({
   onPreviewPageChange,
   storedFileStreamUrl,
   onSaveTemporaryPreview,
+  quickSaveLabel = '',
+  onQuickSave,
   localPlaylists = [],
   onSearchCover,
   onRevealFile,
@@ -82,10 +84,12 @@ export default function TemporalesPanel({
                         streamUrl={storedFileStreamUrl('previews', f.path)}
                         coverUrl={`/api/library/cover?dir=previews&path=${encodeURIComponent(f.path)}`}
                         onDownload={onSaveTemporaryPreview}
+                        quickSaveLabel={quickSaveLabel}
+                        onQuickSave={onQuickSave}
                         downloadPlaylists={localPlaylists}
                         onSearchCover={onSearchCover}
                         onRevealFile={onRevealFile}
-                        downloadLabel="guardar en biblioteca"
+                        downloadLabel="guardar en otra carpeta"
                         layout="horizontal"
                         formatSize={formatSize}
                         dragDir="previews"

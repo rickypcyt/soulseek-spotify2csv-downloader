@@ -1,6 +1,7 @@
 import { Download, FileDown, FilePenLine, FolderOpen, ImagePlus, Music, Pencil, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'react-toastify'
+import PlaylistSelectModal from './PlaylistSelectModal'
 
 const FILE_DRAG_TYPE = 'application/x-soulseek-file'
 const FONT_MONO = "'IBM Plex Mono', 'SFMono-Regular', Menlo, monospace"
@@ -18,7 +19,7 @@ function formatBitrate(bytes, durationSeconds) {
   return `${Math.round((Number(bytes) * 8) / durationSeconds / 1000)} kbps`
 }
 
-export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, downloadLabel = 'descargar', formatSize, onDelete, dragDir, onMoveStart, coverUrl, coverSourceUrl, onEmbedCover, onSearchCover, onRenameFile, onRevealFile, onConvertFlac, onMoveToPlaylist, movePlaylists = [], bpm, metadata = {}, onUpdateMetadata, onSearchMetadata, downloadPlaylists = [], layout = 'horizontal' }) {
+export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownload, downloadLabel = 'descargar', formatSize, onDelete, dragDir, onMoveStart, coverUrl, coverSourceUrl, onEmbedCover, onSearchCover, onRenameFile, onRevealFile, onConvertFlac, onMoveToPlaylist, movePlaylists = [], bpm, metadata = {}, onUpdateMetadata, onSearchMetadata, downloadPlaylists = [], quickSaveLabel = '', onQuickSave, layout = 'horizontal' }) {
   const audioRef = useRef(null)
   const [duration, setDuration] = useState(0)
   const [coverFailed, setCoverFailed] = useState(false)
@@ -30,9 +31,9 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
   const [renamePreview, setRenamePreview] = useState(null)
   const isVertical = layout === 'vertical'
   const extension = (file.name.split('.').pop() || 'archivo').toUpperCase()
-  const downloadTitle = downloadLabel === 'guardar en biblioteca'
-    ? 'Guardar este preview en la biblioteca local'
-    : 'Descargar este archivo al equipo'
+  const downloadTitle = downloadLabel === 'descargar'
+    ? 'Descargar este archivo al equipo'
+    : 'Guardar este preview en la biblioteca local'
 
   const stopAudio = () => {
     if (!audioRef.current) return
@@ -228,10 +229,10 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
   ) : null
 
   const moveButton = onMoveToPlaylist && movePlaylists.length > 0 ? (
-    <div className="relative">
+    <>
       <button
         type="button"
-        onClick={() => setMoveMenuOpen((open) => !open)}
+        onClick={() => setMoveMenuOpen(true)}
         aria-label={`Mover ${file.name} a otra playlist`}
         title="Mover a otra playlist"
         className="flex h-7 min-h-7 shrink-0 items-center gap-1 rounded border border-[#FFFFFF]/40 px-2 py-1 text-[10px] text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/10"
@@ -239,27 +240,19 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
         <FolderOpen size={13} strokeWidth={2} />
         <span className="hidden xl:inline">mover</span>
       </button>
-      {moveMenuOpen && (
-        <div className="absolute bottom-full left-0 z-[100] mb-1 max-h-60 min-w-52 overflow-hidden rounded-lg border border-[#343949] bg-[#161822] shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
-          <div className="border-b border-[#2C303D] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[#8D93A6]">mover a playlist</div>
-          <div className="max-h-48 overflow-y-auto p-1.5">
-            {movePlaylists.map((playlist) => (
-              <button
-                key={playlist}
-                type="button"
-                onClick={() => {
-                  setMoveMenuOpen(false)
-                  onMoveToPlaylist(file.path, playlist)
-                }}
-                className="block w-full rounded-md px-2.5 py-2 text-left text-xs text-[#E9EAF0] transition-colors hover:bg-[#FFFFFF]/10"
-              >
-                <span className="block truncate" title={playlist}>{playlist}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+      <PlaylistSelectModal
+        open={moveMenuOpen}
+        playlists={movePlaylists}
+        title="Mover a playlist"
+        subtitle={file.name}
+        allowEmpty={false}
+        onClose={() => setMoveMenuOpen(false)}
+        onSelect={(playlist) => {
+          setMoveMenuOpen(false)
+          if (playlist) onMoveToPlaylist(file.path, playlist)
+        }}
+      />
+    </>
   ) : null
 
   const revealButton = onRevealFile ? (
@@ -274,12 +267,28 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
     </button>
   ) : null
 
+  const quickSaveButton = quickSaveLabel && onQuickSave ? (
+    <button
+      type="button"
+      onClick={() => {
+        stopAudio()
+        onQuickSave(file.path)
+      }}
+      aria-label={`Guardar ${file.name} en ${quickSaveLabel}`}
+      title={`Guardar directo en la carpeta “${quickSaveLabel}”`}
+      className="flex h-7 min-h-7 max-w-44 shrink-0 items-center gap-1 rounded border border-[#1DB954]/50 px-2 py-1 text-[10px] font-medium text-[#1DB954] transition-colors hover:bg-[#1DB954]/10"
+    >
+      <Download size={13} strokeWidth={2} className="shrink-0" />
+      <span className="hidden truncate xl:inline">Guardar en {quickSaveLabel}</span>
+    </button>
+  ) : null
+
   const downloadButton = onDownload ? (
-    <div className="relative">
+    <>
       <button
         type="button"
         onClick={() => {
-          if (downloadPlaylists.length > 0) setDownloadMenuOpen((open) => !open)
+          if (downloadPlaylists.length > 0) setDownloadMenuOpen(true)
           else onDownload(file.path)
         }}
         aria-label={`${downloadLabel} ${file.name}`}
@@ -289,27 +298,19 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
         <Download size={13} strokeWidth={2} />
         <span className="hidden xl:inline">{downloadLabel}</span>
       </button>
-      {downloadMenuOpen && downloadPlaylists.length > 0 && (
-        <div className="absolute bottom-full left-0 z-[100] mb-1 max-h-60 min-w-52 overflow-hidden rounded-lg border border-[#343949] bg-[#161822] shadow-[0_10px_24px_rgba(0,0,0,0.35)]">
-          <div className="border-b border-[#2C303D] bg-[#161822] px-2.5 py-1.5 text-[10px] uppercase tracking-[0.12em] text-[#8D93A6]">elegir playlist</div>
-          <div className="max-h-48 overflow-y-auto p-1.5">
-            {downloadPlaylists.map((playlist) => (
-              <button
-                key={playlist}
-                type="button"
-                onClick={() => {
-                  setDownloadMenuOpen(false)
-                  onDownload(file.path, playlist)
-                }}
-                className="block w-full rounded-md px-2.5 py-2 text-left text-xs text-[#E9EAF0] transition-colors hover:bg-[#FFFFFF]/10"
-              >
-                <span className="block truncate" title={playlist}>{playlist}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+      <PlaylistSelectModal
+        open={downloadMenuOpen && downloadPlaylists.length > 0}
+        playlists={downloadPlaylists}
+        title={downloadLabel === 'descargar' ? downloadLabel : 'Guardar en biblioteca'}
+        subtitle={file.name}
+        onClose={() => setDownloadMenuOpen(false)}
+        onSelect={(playlist) => {
+          setDownloadMenuOpen(false)
+          if (playlist) onDownload(file.path, playlist)
+          else onDownload(file.path)
+        }}
+      />
+    </>
   ) : downloadUrl ? (
     <a
       href={downloadUrl}
@@ -391,6 +392,7 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
           {deleteButton}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {quickSaveButton}
           {coverButton}
           {metadataButton}
           {convertFlacButton}

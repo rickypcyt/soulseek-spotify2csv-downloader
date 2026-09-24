@@ -22,28 +22,35 @@ export function useSpotifyAuth() {
 
   const startSpotifyAuth = useCallback(async () => {
     try {
-      const data = await requestJson('/api/spotify/auth/start', { method: 'POST' })
+      const data = await requestJson('/api/spotify/auth/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Reautorizar fuerza el flujo completo (pantalla de Spotify incluida);
+        // conectar reusa el token cacheado si todavía es válido.
+        body: JSON.stringify({ force: spotifyAuthRef.current.status === 'authenticated' }),
+      })
       setSpotifyAuth(data)
-      if (data.url) {
-        window.open(data.url, '_blank', 'noopener,noreferrer')
-      }
-      toast.info('Se intentó abrir Spotify. Si no se abrió, usá el link mostrado.')
+      // El backend abre el navegador una vez que el servidor de callback ya
+      // escucha; abrir aquí también duplicaría pestañas.
+      toast.info('Autorizando… si el navegador no se abre solo, usá el link mostrado.')
     } catch (err) {
       toast.error('No se pudo iniciar Spotify: ' + err.message)
     }
   }, [])
 
   // Intervalo dinámico: rápido mientras autentica, lento en estados estables.
+  // El efecto depende del estado actual: si startSpotifyAuth pasa a
+  // 'authenticating' mientras había un timer lento pendiente, el efecto se
+  // reinicia y empieza a pollear rápido de inmediato.
+  const authenticating = spotifyAuth.status === 'authenticating'
   useEffect(() => {
     let cancelled = false
     let timer = null
+    const delay = authenticating ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS
 
     const tick = async () => {
       await fetchSpotifyAuth()
-      if (cancelled) return
-      const status = spotifyAuthRef.current.status
-      const nextDelay = status === 'authenticating' ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS
-      timer = setTimeout(tick, nextDelay)
+      if (!cancelled) timer = setTimeout(tick, delay)
     }
 
     timer = setTimeout(tick, 0)
@@ -51,7 +58,7 @@ export function useSpotifyAuth() {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [fetchSpotifyAuth])
+  }, [authenticating, fetchSpotifyAuth])
 
   return { spotifyAuth, startSpotifyAuth }
 }

@@ -7,7 +7,7 @@ import uuid
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from flask import Blueprint, abort, jsonify, request, send_file
+from flask import Blueprint, Response, abort, jsonify, request
 
 import requests
 
@@ -150,12 +150,12 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             abort(403)
         if not os.path.exists(full):
             abort(404)
-        return send_file(
-            full,
-            mimetype="audio/mpeg",
-            conditional=True,
-            as_attachment=False,
-        )
+        # Leer de una vez y servir bytes: send_file mantiene el handle abierto
+        # mientras el <audio> conserva la conexión, y en Windows eso bloquea
+        # mover o borrar el preview aunque se reintente.
+        with open(full, "rb") as f:
+            data = f.read()
+        return Response(data, mimetype="audio/mpeg")
 
     @bp.route("/api/preview/save", methods=["POST"])
     def api_save_preview():

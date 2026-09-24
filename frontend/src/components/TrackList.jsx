@@ -34,6 +34,8 @@ export default function TrackList({
   previews,
   onStartPreview,
   onSavePreview,
+  quickSaveLabel,
+  onQuickSavePreview,
   onDiscardPreview,
   onCancelPreview,
   onSaveSpotifyPreview,
@@ -107,6 +109,8 @@ export default function TrackList({
         previews={previews}
         onStartPreview={onStartPreview}
         onSavePreview={onSavePreview}
+        quickSaveLabel={quickSaveLabel}
+        onQuickSavePreview={onQuickSavePreview}
         onDiscardPreview={onDiscardPreview}
         onCancelPreview={onCancelPreview}
         onSaveSpotifyPreview={onSaveSpotifyPreview}
