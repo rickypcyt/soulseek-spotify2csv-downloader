@@ -7,9 +7,9 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
-from flask import Blueprint, Response, abort, jsonify, request, send_file
+from flask import Blueprint, abort, jsonify, request, send_file
 
-from backend.fs_utils import safe_join
+from backend.fs_utils import safe_join, serve_file_range
 
 if TYPE_CHECKING:
     from backend.runtime import RuntimeState
@@ -70,11 +70,6 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
         if not os.path.isfile(full):
             abort(404)
         mimetype = mimetypes.guess_type(full)[0] or "application/octet-stream"
-        # Igual que /api/preview/stream: leer de una vez para no retener el
-        # handle del archivo mientras el <audio> está abierto (bloquea
-        # mover/renombrar/borrar en Windows).
-        with open(full, "rb") as f:
-            data = f.read()
-        return Response(data, mimetype=mimetype)
+        return serve_file_range(full, mimetype)
 
     return bp

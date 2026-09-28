@@ -225,6 +225,9 @@ def embed_cover(path: str, data: bytes, mime: str) -> None:
 class LibraryService:
     def __init__(self, state: RuntimeState) -> None:
         self.state = state
+        # (root, rel) -> (size, mtime_ns, title, artist, album). Evita re-parsear
+        # tags con mutagen en cada llamada a index() (el frontend la pide ~cada 2s).
+        self._tag_cache: dict[tuple[str, str], tuple[int, int, str, str, str]] = {}
 
     def playlist_name(self) -> str:
         path = self.state.settings.playlist_name_file
@@ -260,24 +263,35 @@ class LibraryService:
         index: dict[str, dict[str, str]] = {}
         if not os.path.isdir(root):
             return index
+        seen: set[tuple[str, str]] = set()
         for directory, _, names in os.walk(root):
             for name in names:
                 full = os.path.join(directory, name)
                 rel = os.path.relpath(full, root).replace("\\", "/")
                 if rel.split("/")[0].lower() in {"temp", ".incomplete"} or not is_audio_path(rel):
                     continue
+                key = (root, rel)
+                seen.add(key)
                 try:
-                    audio = MutagenFile(full)
-                    title = self._get_field(audio, "TIT2", "TITLE", "\xa9nam")
-                    artist = self._get_field(audio, "TPE1", "ARTIST", "\xa9ART")
-                    album = self._get_field(audio, "TALB", "ALBUM", "\xa9alb")
-                except Exception:
-                    audio = None
-                    title = ""
-                    artist = ""
-                    album = ""
-                if not title:
-                    title = os.path.splitext(name)[0]
+                    stat = os.stat(full)
+                except OSError:
+                    continue
+                cached = self._tag_cache.get(key)
+                if cached and cached[0] == stat.st_size and cached[1] == stat.st_mtime_ns:
+                    title, artist, album = cached[2], cached[3], cached[4]
+                else:
+                    try:
+                        audio = MutagenFile(full)
+                        title = self._get_field(audio, "TIT2", "TITLE", "\xa9nam")
+                        artist = self._get_field(audio, "TPE1", "ARTIST", "\xa9ART")
+                        album = self._get_field(audio, "TALB", "ALBUM", "\xa9alb")
+                    except Exception:
+                        title = ""
+                        artist = ""
+                        album = ""
+                    if not title:
+                        title = os.path.splitext(name)[0]
+                    self._tag_cache[key] = (stat.st_size, stat.st_mtime_ns, title, artist, album)
                 cover_url = f"/api/library/cover?path={quote(rel, safe='')}"
                 index[f"file:{rel}"] = {
                     "track_key": f"file:{rel}",
@@ -288,6 +302,9 @@ class LibraryService:
                     "cover_url": cover_url,
                     "cover_source_url": "",
                 }
+        # Limpiar entradas de archivos borrados/movidos de esta raíz.
+        for key in [k for k in self._tag_cache if k[0] == root and k not in seen]:
+            del self._tag_cache[key]
         return index
 
     def register_track(self, track_key, track_name, artists, path, cover_url="") -> None:

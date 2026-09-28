@@ -76,9 +76,9 @@ export default function TemporalesPanel({
             {diagnostics.previews?.length > 0 && (
               <div>
                 <p className="mb-1 text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>previews</p>
-                <div className="flex flex-nowrap gap-3 overflow-x-auto pb-2">
+                <div className="grid grid-cols-4 gap-3">
                   {visiblePreviewFiles.map((f) => (
-                    <div key={f.path} className="w-72 shrink-0">
+                    <div key={f.path} className="min-w-0">
                       <LibraryAudioCard
                         file={{ ...f, name: f.path.split('/').pop() || f.path }}
                         streamUrl={storedFileStreamUrl('previews', f.path)}

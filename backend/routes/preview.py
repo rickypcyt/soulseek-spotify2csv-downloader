@@ -7,12 +7,12 @@ import uuid
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from flask import Blueprint, Response, abort, jsonify, request
+from flask import Blueprint, abort, jsonify, request
 
 import requests
 
 from backend.database import set_playlist_track_status
-from backend.fs_utils import move_file_with_retry, remove_file_with_retry, safe_dirname, safe_join
+from backend.fs_utils import move_file_with_retry, remove_file_with_retry, safe_dirname, safe_join, serve_file_range
 from backend.spotify_service import read_tracks, run_conversion
 from backend.spotify_to_csv import parse_spotify_id
 
@@ -150,12 +150,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             abort(403)
         if not os.path.exists(full):
             abort(404)
-        # Leer de una vez y servir bytes: send_file mantiene el handle abierto
-        # mientras el <audio> conserva la conexión, y en Windows eso bloquea
-        # mover o borrar el preview aunque se reintente.
-        with open(full, "rb") as f:
-            data = f.read()
-        return Response(data, mimetype="audio/mpeg")
+        return serve_file_range(full, "audio/mpeg")
 
     @bp.route("/api/preview/save", methods=["POST"])
     def api_save_preview():

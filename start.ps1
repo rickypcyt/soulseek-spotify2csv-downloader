@@ -40,14 +40,24 @@ function Assert-Winget {
 
 function Update-SessionPath {
     # Tras instalar con winget, el PATH del proceso actual no se entera.
-    # Lo reconstruimos combinando Machine + User desde el registro.
+    # Lo reconstruimos combinando Machine + User desde el registro, pero
+    # conservando las entradas extra que se hayan añadido a esta sesión.
     $machine = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     $user    = [System.Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machine;$user"
+    $merged  = @()
+    foreach ($entry in (@($machine, $user, $env:Path) -join ';') -split ';') {
+        $entry = $entry.Trim()
+        if ($entry -and $merged -notcontains $entry) { $merged += $entry }
+    }
+    $env:Path = $merged -join ';'
 }
 
 function Confirm-Install([string]$Label) {
     if ($Yes) { return $true }
+    if (-not [Environment]::UserInteractive) {
+        throw "$Label es requerido y no hay terminal interactiva. " +
+              "Vuelve a ejecutar con -Yes para instalarlo automáticamente."
+    }
     $answer = Read-Host "¿Instalar $Label automáticamente con winget? (s/N)"
     return $answer -match '^[sS]'
 }
@@ -66,17 +76,17 @@ function Install-WithWinget([string]$PackageId, [string]$Label) {
     Update-SessionPath
 }
 
-function Install-Python313 {
-    $ok = $false
+function Test-Python313 {
     try {
         py -3.13 -c "" 2>$null
-        $ok = ($LASTEXITCODE -eq 0)
-    } catch { $ok = $false }
+        return $LASTEXITCODE -eq 0
+    } catch { return $false }
+}
 
-    if (-not $ok) {
+function Install-Python313 {
+    if (-not (Test-Python313)) {
         Install-WithWinget $RequiredPythonId "Python 3.13"
-        py -3.13 -c "" 2>$null
-        if ($LASTEXITCODE -ne 0) {
+        if (-not (Test-Python313)) {
             throw "Python 3.13 sigue sin detectarse tras la instalación. Reinicia la terminal e intenta de nuevo."
         }
     }
@@ -92,9 +102,16 @@ function Install-Node {
 }
 
 Install-Python313
-$pythonScripts = py -3.13 -c "import sysconfig; print(sysconfig.get_path('scripts'))"
-if ($LASTEXITCODE -eq 0 -and $pythonScripts) {
-    $env:Path = "$($pythonScripts.Trim());$env:Path"
+
+# Las dependencias viven en un venv del repo, aisladas del Python global.
+$VenvDir = Join-Path $Root ".venv"
+$Python  = Join-Path $VenvDir "Scripts\python.exe"
+if (-not (Test-Path $Python)) {
+    Write-Host "Creando entorno virtual (.venv)..."
+    py -3.13 -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $Python)) {
+        throw "Falló la creación del entorno virtual en $VenvDir."
+    }
 }
 
 $distDir = Join-Path $FrontendDir "dist"
@@ -102,15 +119,17 @@ $distDir = Join-Path $FrontendDir "dist"
 $needFrontendBuild = -not $SkipBuild -or -not (Test-Path (Join-Path $distDir "index.html"))
 if ($needFrontendBuild) { Install-Node }
 
-$needsPip = $Force
-if (-not $needsPip) {
-    py -3.13 -c "import flask, requests, spotipy, keyring, mutagen, PyInstaller" 2>$null
-    if ($LASTEXITCODE -ne 0) { $needsPip = $true }
-}
+# Reinstalar si cambió requirements.txt. El hash se guarda dentro del venv:
+# si el venv desaparece, el hash también y toca reinstalar.
+$ReqHashPath = Join-Path $VenvDir ".requirements.sha256"
+$ReqHash = (Get-FileHash $RequirementsPath -Algorithm SHA256).Hash
+$SavedHash = if (Test-Path $ReqHashPath) { (Get-Content $ReqHashPath -Raw).Trim() } else { "" }
+$needsPip = $Force -or ($ReqHash -ne $SavedHash)
 if ($needsPip) {
     Write-Host "Instalando dependencias de Python..."
-    py -3.13 -m pip install -r $RequirementsPath
+    & $Python -m pip install -r $RequirementsPath
     if ($LASTEXITCODE -ne 0) { throw "Falló pip install." }
+    Set-Content -Path $ReqHashPath -Value $ReqHash -NoNewline
 } else {
     Write-Host "Dependencias de Python ya están instaladas."
 }
@@ -128,16 +147,30 @@ if ($needFrontendBuild) {
         }
     }
 
-    Write-Host "Compilando frontend..."
-    Push-Location $FrontendDir
-    try {
-        npm run build
-        if ($LASTEXITCODE -ne 0) { throw "Falló el build del frontend." }
-    } finally {
-        Pop-Location
+    # Vite reescribe frontend/dist entero, así que compilar siempre regeneraría
+    # los timestamps y forzaría un reempaquetado del exe en cada arranque.
+    # Solo compilamos si alguna fuente (src/, configs) es más nueva que el build.
+    $distIndex = Join-Path $distDir "index.html"
+    $frontendInputs = @(
+        Get-ChildItem (Join-Path $FrontendDir "src") -Recurse -File -ErrorAction SilentlyContinue
+        Get-ChildItem $FrontendDir -File -ErrorAction SilentlyContinue
+    )
+    $frontendNewest = ($frontendInputs | Measure-Object LastWriteTime -Maximum).Maximum
+    $frontendStale = $Force -or -not (Test-Path $distIndex) -or
+                     (-not $frontendNewest) -or
+                     ($frontendNewest -gt (Get-Item $distIndex).LastWriteTime)
+    if ($frontendStale) {
+        Write-Host "Compilando frontend..."
+        Push-Location $FrontendDir
+        try {
+            npm run build
+            if ($LASTEXITCODE -ne 0) { throw "Falló el build del frontend." }
+        } finally {
+            Pop-Location
+        }
     }
 
-    if (-not (Test-Path $distDir)) {
+    if (-not (Test-Path $distIndex)) {
         throw "No se encontró frontend/dist tras el build."
     }
 }
@@ -149,7 +182,7 @@ if ($SkipBuild) {
     Stop-SoulseekProcesses
     Push-Location $Root
     try {
-        py -3.13 -m backend.spotify_web
+        & $Python -m backend.spotify_web
     } finally {
         Pop-Location
     }
@@ -176,7 +209,7 @@ if ($needsBuild) {
     $slskdExe = Get-ChildItem -Path $vendorSlskd -Filter "slskd.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $slskdExe) {
         Write-Host "Descargando slskd para empaquetar..."
-        py -3.13 -c "from backend.bootstrap import download_slskd; download_slskd()"
+        & $Python -c "from backend.bootstrap import download_slskd; download_slskd()"
         if ($LASTEXITCODE -ne 0) { throw "Falló la descarga de slskd." }
         $slskdExe = Get-ChildItem -Path $vendorSlskd -Filter "slskd.exe" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $slskdExe) { throw "No se encontró slskd.exe tras descargar." }
@@ -184,7 +217,7 @@ if ($needsBuild) {
     Write-Host "Empaquetando ejecutable..."
     Push-Location $Root
     try {
-        py -3.13 -m PyInstaller $SpecPath --noconfirm --clean
+        & $Python -m PyInstaller $SpecPath --noconfirm --clean
         if ($LASTEXITCODE -ne 0) { throw "Falló PyInstaller." }
     } finally {
         Pop-Location
