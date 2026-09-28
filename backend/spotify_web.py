@@ -44,19 +44,33 @@ def _setup_logging() -> None:
         return
     try:
         log_path = data_dir() / "spotify2soulseek.log"
+        log_file = open(log_path, "a", encoding="utf-8")
+        console = sys.stdout
+        log_file.write(
+            f"\n{'=' * 60}\n"
+            f"  nueva sesión · {time.strftime('%Y-%m-%d %H:%M:%S')} · v{APP_VERSION}\n"
+            f"{'=' * 60}\n"
+        )
 
-        class _LogStream:
-            def __init__(self, path):
-                self._file = open(path, "a", encoding="utf-8")
+        class _TeeStream:
+            """Escribe a la vez en la consola y en el archivo de log."""
 
             def write(self, msg):
-                self._file.write(msg)
-                self._file.flush()
+                for stream in (console, log_file):
+                    try:
+                        stream.write(msg)
+                        stream.flush()
+                    except Exception:
+                        pass
 
             def flush(self):
-                self._file.flush()
+                for stream in (console, log_file):
+                    try:
+                        stream.flush()
+                    except Exception:
+                        pass
 
-        sys.stdout = _LogStream(log_path)
+        sys.stdout = _TeeStream()
         sys.stderr = sys.stdout
     except Exception:
         pass
@@ -116,6 +130,22 @@ def _check_updates_background() -> None:
     threading.Thread(target=_run, daemon=True).start()
 
 
+def _print_welcome(url: str) -> None:
+    bar = "=" * 58
+    print()
+    print(bar)
+    print(f"   spotify2soulseek  ·  v{APP_VERSION}")
+    print("   Tus playlists de Spotify, descargadas desde Soulseek")
+    print(bar)
+    print()
+    print(f"   La interfaz se abrirá en tu navegador:  {url}")
+    print()
+    print("   · Deja esta ventana abierta mientras usas la aplicación.")
+    print("   · Al cerrarla, la app se detiene por completo.")
+    print("   · Comandos:  --version · --check-update · --update")
+    print()
+
+
 def _open_browser_delayed(url: str, delay: float = 2.0) -> None:
     """Open the browser after a short delay (lets Flask start listening)."""
 
@@ -152,13 +182,17 @@ def main() -> None:
     port = int(os.getenv("SOULSEEK_PORT", "5000"))
     url = f"http://{host}:{port}"
 
-    print("[startup] Verificando slskd...")
+    if not dev_mode:
+        _print_welcome(url)
+
+    print("[startup] Comprobando slskd (el motor de Soulseek)...")
     slskd_path = ensure_slskd(state.config_store)
     if slskd_path:
         print(f"[startup] slskd listo: {slskd_path}")
     else:
-        print("[startup] slskd no disponible. Se podrá configurar manualmente desde la interfaz.")
+        print("[startup] slskd no disponible ahora mismo; podrás configurarlo desde la interfaz.")
 
+    print("[startup] Iniciando el servidor local...")
     state.slskd.start_from_config()
 
     def _run_server() -> None:
@@ -178,12 +212,17 @@ def main() -> None:
         atexit.register(state.slskd.stop)
         try:
             webbrowser.open(url)
-            print(f"[startup] Navegador abierto en {url}")
+            print(f"[startup] Todo listo. Navegador abierto en {url}")
+            print("[startup] Puedes minimizar esta ventana; la app sigue funcionando.")
         except Exception:
             print(f"[startup] Abre manualmente: {url}")
-        # Mantener el proceso vivo: el servidor corre en el hilo daemon.
-        while True:
-            time.sleep(1)
+        try:
+            # Mantener el proceso vivo: el servidor corre en el hilo daemon.
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[salida] Cerrando spotify2soulseek...")
+            return
 
     if not dev_mode:
         print(f"[startup] Abriendo navegador en {url} ...")
@@ -191,7 +230,10 @@ def main() -> None:
     else:
         print(f"[startup] Modo desarrollo: abre {url} manualmente")
 
-    app.run(debug=dev_mode, use_reloader=dev_mode, host=host, port=port)
+    try:
+        app.run(debug=dev_mode, use_reloader=dev_mode, host=host, port=port)
+    except KeyboardInterrupt:
+        print("\n[salida] Cerrando spotify2soulseek...")
 
 
 if __name__ == "__main__":
