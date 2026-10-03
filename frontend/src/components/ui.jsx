@@ -113,8 +113,8 @@ export function Pagination({ page, total, pageSize, onChange }) {
   )
 }
 
-export function StatusItem({ label, description, ready, pending = false, readyLabel = 'Correcto' }) {
-  const state = pending ? 'Pendiente' : ready ? readyLabel : 'Revisar'
+export function StatusItem({ label, description, ready, pending = false, readyLabel = 'Correcto', pendingLabel = 'Pendiente' }) {
+  const state = pending ? pendingLabel : ready ? readyLabel : 'Revisar'
   const color = pending
     ? 'border-amber-400/40 bg-amber-400/10 text-amber-200'
     : ready

@@ -1,4 +1,5 @@
 export default function SearchActions({ searchId, onRefresh, onCancel }) {
+  if (!searchId) return null
   return (
     <div className="mt-2 flex gap-1.5">
       <button

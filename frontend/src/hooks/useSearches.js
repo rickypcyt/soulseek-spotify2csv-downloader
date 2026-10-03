@@ -44,19 +44,50 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
     }
   }, [])
 
-  const enqueueSearch = useCallback((fn) => {
-    searchQueueRef.current.push({ fn })
+  const enqueueSearch = useCallback((fn, { front = false } = {}) => {
+    // front=true: la búsqueda manual salta al inicio de la cola, por delante
+    // de una búsqueda masiva en curso.
+    if (front) searchQueueRef.current.unshift({ fn })
+    else searchQueueRef.current.push({ fn })
     processSearchQueue()
   }, [processSearchQueue])
+
+  const makeSearchEntry = useCallback((i, overrides = {}) => ({
+    searchId: null,
+    trackIndex: i,
+    trackKey: getSpotifyTrackId(tracks[i]?.spotify_url),
+    resultsCount: 0,
+    status: 'buscando',
+    pollCount: 0,
+    raw: null,
+    ...overrides,
+  }), [tracks])
+
+  // Placeholder mientras el POST está en vuelo: el backend puede tardar
+  // varios segundos (esperando el login de slskd) y sin esto el botón
+  // parece no hacer nada.
+  const setSearchPlaceholder = useCallback((i, query) => {
+    setSearches((prev) => [
+      ...prev.filter((s) => s.trackIndex !== i),
+      makeSearchEntry(i, { query, pending: true }),
+    ])
+  }, [makeSearchEntry])
+
+  const clearSearchPlaceholder = useCallback((i) => {
+    setSearches((prev) => prev.filter((s) => !(s.trackIndex === i && s.pending)))
+  }, [])
 
   // Buscar en Soulseek para una pista en particular
   const searchTrack = useCallback(async (i, query) => {
     const q = (query || '').trim()
-    if (!q) return
+    if (!q) {
+      toast.error('Escribe una búsqueda primero')
+      return
+    }
 
     enqueueSearch(async () => {
       // Reemplazar búsqueda anterior de la misma pista
-      setSearches((prev) => prev.filter((s) => s.trackIndex !== i))
+      setSearchPlaceholder(i, q)
 
       try {
         const r = await request('/api/search_soulseek', {
@@ -66,59 +97,79 @@ export function useSearches({ tracks, url, initialAutoSearchDone = false, initia
         })
         const data = await r.json()
         if (!r.ok) {
+          clearSearchPlaceholder(i)
           toast.error(data.error || 'Error')
           return
         }
         setSearches((prev) => [
-          ...prev,
-          {
+          ...prev.filter((s) => !(s.trackIndex === i && s.pending)),
+          makeSearchEntry(i, {
             searchId: data.searchId,
-            trackIndex: i,
-            trackKey: getSpotifyTrackId(tracks[i]?.spotify_url),
             query: data.query,
             resultsCount: data.resultsCount,
             status: data.status || 'buscando',
-            pollCount: 0,
-            raw: null,
-          },
+          }),
         ])
       } catch (err) {
+        clearSearchPlaceholder(i)
         toast.error('Error: ' + err.message)
       }
-    })
-  }, [tracks, enqueueSearch])
+    }, { front: true })
+  }, [enqueueSearch, makeSearchEntry, setSearchPlaceholder, clearSearchPlaceholder])
 
   const autoSearchAll = useCallback(() => {
     searchQueueRef.current = []
+    let enqueued = 0
+    let skippedCached = 0
+    let errorShown = false
+    const reportError = (message) => {
+      if (errorShown) return
+      errorShown = true
+      toast.error(message)
+    }
     tracks.forEach((t, i) => {
-      if (searchesRef.current.some((search) => search.trackIndex === i && search.cached)) return
+      if (searchesRef.current.some((search) => search.trackIndex === i && search.cached)) {
+        skippedCached += 1
+        return
+      }
+      const q = (t.search_query || '').trim()
+      if (!q) return
+      enqueued += 1
       enqueueSearch(async () => {
-        setSearches((prev) => prev.filter((s) => s.trackIndex !== i))
+        setSearchPlaceholder(i, q)
         try {
           const r = await request('/api/search_soulseek', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: t.search_query }),
+            body: JSON.stringify({ query: q }),
           })
           const data = await r.json()
-          if (!r.ok) return
+          if (!r.ok) {
+            clearSearchPlaceholder(i)
+            reportError(data.error || `Error ${r.status} al buscar`)
+            return
+          }
           setSearches((prev) => [
-            ...prev,
-            {
+            ...prev.filter((s) => !(s.trackIndex === i && s.pending)),
+            makeSearchEntry(i, {
               searchId: data.searchId,
-              trackIndex: i,
-              trackKey: getSpotifyTrackId(tracks[i]?.spotify_url),
               query: data.query,
               resultsCount: data.resultsCount,
               status: data.status || 'buscando',
-              pollCount: 0,
-              raw: null,
-            },
+            }),
           ])
-        } catch {}
+        } catch (err) {
+          clearSearchPlaceholder(i)
+          reportError('Error: ' + err.message)
+        }
       })
     })
-  }, [tracks, enqueueSearch])
+    if (enqueued > 0) {
+      toast.info(`Buscando ${enqueued} pista(s) en Soulseek…`)
+    } else if (skippedCached > 0) {
+      toast.info('Todas las pistas ya tienen búsqueda en caché')
+    }
+  }, [tracks, enqueueSearch, makeSearchEntry, setSearchPlaceholder, clearSearchPlaceholder])
 
   // Keep a ref in sync so the polling loop always reads the latest searches.
   useEffect(() => {

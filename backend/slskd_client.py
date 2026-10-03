@@ -31,6 +31,10 @@ MAX_SEARCH_QUERY_LENGTH = 200
 MAX_ACTIVE_SEARCHES = 50
 MAX_SEARCH_LIFETIME_SECONDS = 120
 SEARCH_QUEUE_TIMEOUT_SECONDS = 120
+# Tras un wait de login fallido, los siguientes intentos fallan rápido durante
+# este intervalo (en vez de bloquear otros ~15s cada uno) mientras slskd no se
+# loguee. Así una búsqueda masiva no inmoviliza la cola durante un outage.
+LOGIN_RETRY_COOLDOWN_SECONDS = 20
 _TERMINAL_SEARCH_STATES = {"completed", "complete", "finished", "failed", "error", "cancelled", "canceled"}
 _COMPLETED_TRANSFER_STATES = {"completed", "complete", "succeeded", "finished"}
 
@@ -49,6 +53,8 @@ class SlskdClient:
         self.active_search_started: dict[str, float] = {}
         # Cola de búsquedas: las peticiones esperan a que se libere un slot.
         self._search_slot = threading.Condition()
+        # Cooldown tras un wait de login fallido (ver LOGIN_RETRY_COOLDOWN_SECONDS).
+        self._login_wait_failed_at: float = 0.0
         # Pending download tracking (replaces PENDING_DOWNLOADS / *_FOLDERS / *_METADATA).
         self.pending_folders: dict[tuple[str, str], str | None] = {}
         self.pending_metadata: dict[tuple[str, str], dict[str, str]] = {}
@@ -148,6 +154,66 @@ class SlskdClient:
         except requests.RequestException:
             return False
 
+    def server_state(self) -> dict[str, Any]:
+        """Return slskd's Soulseek server connection state ({} if unavailable)."""
+        try:
+            response = requests.get(f"{self.url}/api/v0/server", headers=self.headers(), timeout=2)
+            if response.ok:
+                return response.json()
+        except requests.RequestException:
+            pass
+        return {}
+
+    def server_logged_in(self) -> bool:
+        """True when slskd is connected AND logged in to the Soulseek server."""
+        return self._is_logged_in(self.server_state())
+
+    @staticmethod
+    def _is_logged_in(data: dict[str, Any]) -> bool:
+        return bool(data.get("isLoggedIn")) or "LoggedIn" in str(data.get("state", ""))
+
+    def reconnect_server(self) -> bool:
+        """Kick slskd's connection watchdog to (re)connect to the Soulseek server."""
+        try:
+            response = requests.put(f"{self.url}/api/v0/server", headers=self.headers(), timeout=5)
+            return response.ok
+        except requests.RequestException:
+            return False
+
+    def wait_for_server_login(self, timeout_seconds: float = 15) -> bool:
+        """Wait until slskd finishes logging in to the Soulseek server.
+
+        slskd's HTTP API responds before the Soulseek login completes; searches
+        issued in that window fail with 409. If slskd is fully disconnected we
+        kick its connection watchdog (it does not always retry on its own).
+        After a failed wait, calls fail fast during LOGIN_RETRY_COOLDOWN_SECONDS
+        so a batch of queued searches does not stall ~15s per item.
+        """
+        if self._login_wait_failed_at and (
+            time.monotonic() - self._login_wait_failed_at < LOGIN_RETRY_COOLDOWN_SECONDS
+        ):
+            return self.server_logged_in()
+        reconnect_attempted = False
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            data = self.server_state()
+            if self._is_logged_in(data):
+                self._login_wait_failed_at = 0.0
+                return True
+            if (
+                not reconnect_attempted
+                and data
+                and "Disconnected" in str(data.get("state", ""))
+                and not data.get("isTransitioning")
+            ):
+                reconnect_attempted = True
+                self.state.logs.add("[slskd] Servidor desconectado; solicitando reconexión")
+                self.reconnect_server()
+            if time.monotonic() >= deadline:
+                self._login_wait_failed_at = time.monotonic()
+                return False
+            time.sleep(0.5)
+
     def unavailable_message(self) -> str:
         configured_path = self.state.config_store.get().get("slskd_path", "")
         if configured_path:
@@ -214,6 +280,17 @@ class SlskdClient:
             message = self.unavailable_message()
             self.state.logs.add(f"[slskd] {message}")
             return {"error": message, "status": "unavailable"}, 503
+        # La API de slskd responde antes de completar el login en el servidor
+        # de Soulseek; buscar en ese intervalo devuelve 409.
+        if not self.wait_for_server_login():
+            server_state = str(self.server_state().get("state") or "desconocido")
+            message = (
+                f"slskd no está logueado en el servidor de Soulseek ({server_state}). "
+                "Reintenta en unos segundos; si persiste, revisa tu red: el puerto "
+                "saliente 2271 debe ser alcanzable (VPN/firewall)."
+            )
+            self.state.logs.add(f"[slskd] {message}")
+            return {"error": message, "status": "connecting"}, 503
         # Cola de búsquedas: esperar a que haya un slot libre.
         self._prune_active_searches()
         search_id = str(uuid.uuid4())
@@ -242,6 +319,12 @@ class SlskdClient:
             if not response.ok:
                 self.active_search_ids.discard(search_id)
                 self.active_search_started.pop(search_id, None)
+                if response.status_code == 409:
+                    message = (
+                        "slskd perdió la sesión con el servidor de Soulseek o aún "
+                        "está conectando. Reintenta en unos segundos."
+                    )
+                    return {"error": message, "details": data, "status": "connecting"}, 409
                 return {"error": f"Error {response.status_code}", "details": data}, response.status_code
             data = self.normalize_search(data)
             data["searchId"] = search_id

@@ -3,9 +3,12 @@ import { StatusItem } from './ui'
 export default function ConfigurationStatus({ config, diagnostics, backendOnline, spotifyAuth, onStartSpotifyAuth }) {
   const status = diagnostics?.configuration
   const hasStatus = Boolean(status)
-  const slskdReady = hasStatus
-    ? Boolean(status.slskd?.reachable && status.slskd?.apiKeyConfigured)
-    : false
+  const slskdReachable = hasStatus ? Boolean(status.slskd?.reachable) : false
+  const slskdLoggedIn = hasStatus ? Boolean(status.slskd?.loggedIn) : false
+  const slskdReady = slskdReachable && slskdLoggedIn && Boolean(status.slskd?.apiKeyConfigured)
+  const slskdConnecting = slskdReachable && !slskdLoggedIn
+  const slskdServerState = status?.slskd?.serverState || ''
+  const slskdDisconnected = slskdConnecting && slskdServerState === 'Disconnected'
   const downloadsReady = hasStatus
     ? Boolean(status.downloads?.exists)
     : Boolean(config?.downloads_dir)
@@ -64,10 +67,19 @@ export default function ConfigurationStatus({ config, diagnostics, backendOnline
         </div>
         <StatusItem
           label="Soulseek / slskd"
-          description={slskdReady ? `Servicio conectado en ${status.slskd.url}.` : 'El servicio no responde o falta la API key. Revisa slskd.exe y su URL.'}
+          description={
+            slskdDisconnected
+              ? 'slskd está desconectado del servidor de Soulseek y no se puede buscar. Si no reconecta solo, tu red puede estar bloqueando el puerto 2271 (p. ej. firewall o wifi restringido).'
+              : slskdConnecting
+                ? `slskd responde pero sigue iniciando sesión en el servidor de Soulseek (${slskdServerState || 'conectando'}). Las búsquedas se habilitan al conectar.`
+                : slskdReady
+                  ? `Servicio conectado en ${status.slskd.url}.`
+                  : 'El servicio no responde o falta la API key. Revisa slskd.exe y su URL.'
+          }
           ready={slskdReady}
           readyLabel="Conectado"
-          pending={!hasStatus}
+          pending={!hasStatus || slskdConnecting}
+          pendingLabel={slskdDisconnected ? 'Desconectado' : slskdConnecting ? 'Conectando…' : 'Pendiente'}
         />
         <StatusItem
           label="Carpeta de descargas"

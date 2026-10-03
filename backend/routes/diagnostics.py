@@ -42,6 +42,7 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             transfers = state.slskd.active_transfers()
             current_config = state.config_store.get()
             slskd_path = current_config.get("slskd_path", "")
+            server_state = state.slskd.server_state()
             return jsonify({
                 "previews": files,
                 "downloads": downloads_files,
@@ -57,6 +58,9 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
                     "slskd": {
                         "url": state.slskd.url,
                         "reachable": state.slskd.reachable(),
+                        "serverState": server_state.get("state"),
+                        "loggedIn": bool(server_state.get("isLoggedIn"))
+                            or "LoggedIn" in str(server_state.get("state", "")),
                         "apiKeyConfigured": bool(current_config.get("slskd_api_key_configured")),
                         "executableConfigured": bool(slskd_path),
                         "executableExists": bool(slskd_path and os.path.isfile(slskd_path)),

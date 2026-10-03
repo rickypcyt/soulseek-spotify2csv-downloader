@@ -696,7 +696,7 @@ function App() {
           </div>
         )}
 
-        {activeTab === 'settings' && (
+        {(activeTab === 'settings' || activeTab === 'main') && (
           <ConfigurationStatus
             config={config}
             diagnostics={diagnostics}

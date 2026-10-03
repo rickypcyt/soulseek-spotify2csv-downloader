@@ -29,7 +29,11 @@ export function useDiagnostics() {
       if (cancelled) return
       const transfers = diagnosticsRef.current?.transfers || []
       const hasActive = transfers.some((transfer) => !isCompletedTransfer(transfer))
-      const nextDelay = hasActive ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS
+      // Mientras slskd no esté logueado en el servidor de Soulseek, refrescar
+      // rápido para que el estado de conexión se actualice en la UI.
+      const slskd = diagnosticsRef.current?.configuration?.slskd
+      const slskdNotReady = Boolean(slskd && slskd.reachable && !slskd.loggedIn)
+      const nextDelay = hasActive || slskdNotReady ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS
       timer = setTimeout(tick, nextDelay)
     }
 
