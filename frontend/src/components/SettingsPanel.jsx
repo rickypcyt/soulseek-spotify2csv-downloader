@@ -1,5 +1,22 @@
-export default function SettingsPanel({ config, onChange, onSave, saving, open = false }) {
+import { useState } from 'react'
+
+export default function SettingsPanel({ config, onChange, onSave, saving, onValidateSoulseek, open = false }) {
   const update = (key, value) => onChange((current) => ({ ...current, [key]: value }))
+  const [validating, setValidating] = useState(false)
+  const [validation, setValidation] = useState(null)
+
+  const handleValidate = async () => {
+    if (!onValidateSoulseek) return
+    setValidating(true)
+    setValidation(null)
+    try {
+      setValidation(await onValidateSoulseek(config.soulseek_username || '', config.soulseek_password || ''))
+    } catch (err) {
+      setValidation({ ok: false, message: `No se pudo comprobar: ${err.message}` })
+    } finally {
+      setValidating(false)
+    }
+  }
 
   return (
     <details open={open} className="mb-8 rounded-xl border border-slate-600 bg-slate-800">
@@ -90,6 +107,26 @@ export default function SettingsPanel({ config, onChange, onSave, saving, open =
             className="mt-1 w-full rounded border border-[#2C303D] bg-[#0D0F16] px-2 py-1.5 text-sm text-[#E9EAF0]"
           />
         </label>
+        <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+          <button
+            type="button"
+            onClick={handleValidate}
+            disabled={validating || !onValidateSoulseek}
+            className="rounded border border-[#FFFFFF]/40 bg-[#FFFFFF]/10 px-3 py-1.5 text-xs font-medium text-[#FFFFFF] transition-colors hover:bg-[#FFFFFF]/20 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {validating ? 'comprobando…' : 'comprobar credenciales de Soulseek'}
+          </button>
+          {validation && (
+            <p className={`text-xs ${validation.ok ? 'text-emerald-300' : 'text-amber-200'}`}>
+              {validation.message}
+            </p>
+          )}
+          {validating && (
+            <p className="text-xs text-[#8D93A6]">
+              Reiniciando slskd y esperando el inicio de sesión (puede tardar ~25 s)…
+            </p>
+          )}
+        </div>
         <label className="text-sm font-medium text-slate-200">
           Ruta de slskd.exe
           <input

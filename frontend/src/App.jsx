@@ -511,6 +511,16 @@ function App() {
 
   const refreshLibrary = () => fetchDiagnostics()
 
+  const validateSoulseek = useCallback(async (username, password) => {
+    const data = await requestJson('/api/config/validate-soulseek', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    })
+    fetchDiagnostics()
+    return data
+  }, [fetchDiagnostics])
+
   // ---- derived values for the library / temporales panels ----
   const libraryFiles = useMemo(
     () => (diagnostics?.downloads || []).filter(isLibraryFile).sort((a, b) => a.path.localeCompare(b.path)),
@@ -712,6 +722,7 @@ function App() {
             onChange={setConfig}
             onSave={saveConfig}
             saving={savingConfig}
+            onValidateSoulseek={validateSoulseek}
             open
           />
         )}

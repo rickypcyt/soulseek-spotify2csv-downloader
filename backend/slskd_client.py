@@ -58,6 +58,8 @@ class SlskdClient:
         # Pending download tracking (replaces PENDING_DOWNLOADS / *_FOLDERS / *_METADATA).
         self.pending_folders: dict[tuple[str, str], str | None] = {}
         self.pending_metadata: dict[tuple[str, str], dict[str, str]] = {}
+        # Credenciales con las que se lanzó el proceso slskd actual (o None).
+        self._running_credentials: tuple[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Configuration / process management
@@ -80,7 +82,17 @@ class SlskdClient:
         self.state.logs.add("[slskd] API key generada y guardada en el almacén seguro")
         return self.key
 
-    def start_from_config(self) -> bool:
+    def start_from_config(
+        self,
+        soulseek_username: str | None = None,
+        soulseek_password: str | None = None,
+    ) -> bool:
+        """Start the managed slskd process.
+
+        ``soulseek_username``/``soulseek_password`` override the stored secrets
+        (empty values fall back to the stored ones); slskd only reads its
+        Soulseek credentials from the environment at process start.
+        """
         path = self.state.config_store.get().get("slskd_path", "")
         if not path or not os.path.isfile(path):
             return False
@@ -93,11 +105,13 @@ class SlskdClient:
         os.makedirs(incomplete_dir, exist_ok=True)
         os.makedirs(webroot_dir, exist_ok=True)
         api_key = self._ensure_api_key()
+        username = soulseek_username or self.state.config_store.get_secret("soulseek_username") or ""
+        password = soulseek_password or self.state.config_store.get_secret("soulseek_password") or ""
         environment = os.environ.copy()
         environment.update(
             {
-                "SLSKD_SLSK_USERNAME": self.state.config_store.get_secret("soulseek_username") or "",
-                "SLSKD_SLSK_PASSWORD": self.state.config_store.get_secret("soulseek_password") or "",
+                "SLSKD_SLSK_USERNAME": username,
+                "SLSKD_SLSK_PASSWORD": password,
                 "SLSKD__WEB__HTTPS__DISABLED": "true",
                 "SLSKD__WEB__CONTENT_PATH": webroot_dir,
                 "SLSKD_NO_HTTPS": "true",
@@ -112,6 +126,7 @@ class SlskdClient:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        self._running_credentials = (username, password)
         self.state.logs.add("[slskd] Servicio iniciado desde la configuración local")
         return True
 
@@ -124,6 +139,7 @@ class SlskdClient:
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
+        self._running_credentials = None
 
     def ensure_available(self, wait_seconds: float = 8) -> bool:
         """Start the configured slskd and wait briefly for its HTTP API to listen."""
@@ -213,6 +229,119 @@ class SlskdClient:
                 self._login_wait_failed_at = time.monotonic()
                 return False
             time.sleep(0.5)
+
+    def validate_credentials(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        timeout_seconds: float = 25,
+    ) -> dict[str, Any]:
+        """Validate Soulseek credentials by observing slskd's server login.
+
+        slskd only takes Soulseek credentials via environment at process start,
+        so when explicit credentials are provided and the process is managed by
+        this app, it is restarted with them. With an external slskd (one this
+        app did not launch) the credentials cannot be changed — only the
+        current login state is evaluated.
+
+        ``status`` in the result is one of:
+
+        - ``valid``: logged in to the Soulseek server.
+        - ``invalid``: the server was reached but the login never completed
+          (credentials most likely rejected).
+        - ``unreachable``: no TCP session with the server was ever established
+          (network/firewall/port 2271, or server down).
+        - ``missing``: no username/password available to test.
+        - ``slskd_down``: the slskd HTTP API did not come up.
+        """
+        username = (username or self.state.config_store.get_secret("soulseek_username") or "").strip()
+        password = password or self.state.config_store.get_secret("soulseek_password") or ""
+        if not username or not password:
+            return {
+                "ok": False,
+                "status": "missing",
+                "message": "Falta el usuario o la contraseña de Soulseek.",
+            }
+
+        managed = self.process is not None and self.process.poll() is None
+        external = not managed and self.reachable()
+        if external:
+            # slskd no gestionado por la app: no podemos cambiar sus credenciales.
+            self.reconnect_server()
+        else:
+            if managed and self._running_credentials == (username, password):
+                self.reconnect_server()
+            else:
+                self.stop()
+                if not self.start_from_config(username, password):
+                    return {
+                        "ok": False,
+                        "status": "slskd_down",
+                        "managed": True,
+                        "message": self.unavailable_message(),
+                    }
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if self.reachable():
+                    break
+                if self.process and self.process.poll() is not None:
+                    break
+                time.sleep(0.25)
+            if not self.reachable():
+                return {
+                    "ok": False,
+                    "status": "slskd_down",
+                    "managed": not external,
+                    "message": self.unavailable_message(),
+                }
+            self.reconnect_server()
+
+        # Observar el handshake: el servidor acepta el TCP ("Connected") antes de
+        # validar el login ("LoggedIn"). Si se alcanza Connected sin llegar a
+        # LoggedIn durante el intervalo, el login fue rechazado.
+        saw_connected = False
+        last_state = ""
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            data = self.server_state()
+            last_state = str(data.get("state") or last_state)
+            parts = {part.strip() for part in last_state.split(",")}
+            if data.get("isLoggedIn") or "LoggedIn" in parts:
+                self._login_wait_failed_at = 0.0
+                return {
+                    "ok": True,
+                    "status": "valid",
+                    "managed": not external,
+                    "state": last_state,
+                    "message": f"Credenciales válidas: sesión iniciada como {username}.",
+                }
+            if data.get("isConnected") or "Connected" in parts:
+                saw_connected = True
+            time.sleep(0.5)
+
+        note = "" if not external else " Nota: slskd es externo a la app; se evaluaron sus propias credenciales."
+        if saw_connected:
+            return {
+                "ok": False,
+                "status": "invalid",
+                "managed": not external,
+                "state": last_state,
+                "message": (
+                    "El servidor de Soulseek respondió pero el inicio de sesión no se completó; "
+                    "lo más probable es que el usuario o la contraseña sean incorrectos." + note
+                ),
+            }
+        return {
+            "ok": False,
+            "status": "unreachable",
+            "managed": not external,
+            "state": last_state,
+            "message": (
+                "slskd no consiguió conectar con el servidor de Soulseek. "
+                "No se pueden validar las credenciales: revisa la red "
+                "(el puerto saliente 2271 debe ser alcanzable)." + note
+            ),
+        }
 
     def unavailable_message(self) -> str:
         configured_path = self.state.config_store.get().get("slskd_path", "")
