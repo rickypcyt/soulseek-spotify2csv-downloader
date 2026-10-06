@@ -106,7 +106,10 @@ function App() {
   const { navigate, activeTab } = useTabNavigation()
   const { config, setConfig, saveConfig, savingConfig, configLoaded } = useConfig()
   const { diagnostics, fetchDiagnostics } = useDiagnostics()
-  const { libraryIndex, fetchLibraryIndex } = useLibraryIndex()
+  const libraryActive = Object.values(sessionMeta).some(
+    (m) => (m?.queued || 0) + (m?.active || 0) + (m?.searches || 0) > 0
+  ) || (diagnostics?.transfers || []).some((t) => !isCompletedTransfer(t))
+  const { libraryIndex, fetchLibraryIndex } = useLibraryIndex({ active: libraryActive })
   const { logs, backendOnline } = useLogs()
   const { spotifyAuth, startSpotifyAuth } = useSpotifyAuth()
 

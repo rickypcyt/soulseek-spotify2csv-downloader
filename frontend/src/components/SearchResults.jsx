@@ -253,6 +253,7 @@ export default function SearchResults({
                       src={activePreview.savedPath
                         ? storedFileStreamUrl('downloads', activePreview.savedPath)
                         : `/api/preview/stream?path=${encodeURIComponent(activePreview.path)}`}
+                      preload="none"
                       className="h-8 min-w-0 flex-1"
                     />
                     <button

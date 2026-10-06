@@ -50,11 +50,11 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
       src={coverImgUrl}
       alt=""
       onError={() => setCoverFailed(true)}
-      className={isVertical ? 'h-16 w-16 shrink-0 rounded object-cover' : 'h-10 w-10 min-h-10 min-w-10 shrink-0 rounded object-cover'}
+      className={isVertical ? 'h-24 w-24 shrink-0 rounded object-cover' : 'h-14 w-14 min-h-14 min-w-14 shrink-0 rounded object-cover'}
     />
   ) : (
-    <span className={isVertical ? 'flex h-16 w-16 shrink-0 items-center justify-center rounded bg-[#0D0F16] text-[#565C6E]' : 'flex h-10 w-10 min-h-10 min-w-10 shrink-0 items-center justify-center rounded bg-[#0D0F16] text-[#565C6E]'}>
-      <Music size={isVertical ? 28 : 16} strokeWidth={2} />
+    <span className={isVertical ? 'flex h-24 w-24 shrink-0 items-center justify-center rounded bg-[#0D0F16] text-[#565C6E]' : 'flex h-14 w-14 min-h-14 min-w-14 shrink-0 items-center justify-center rounded bg-[#0D0F16] text-[#565C6E]'}>
+      <Music size={isVertical ? 36 : 20} strokeWidth={2} />
     </span>
   )
 
@@ -400,7 +400,7 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
             ref={audioRef}
             src={streamUrl}
             controls
-            preload="metadata"
+            preload="none"
             onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
             className="h-8 min-w-0 flex-1"
           />

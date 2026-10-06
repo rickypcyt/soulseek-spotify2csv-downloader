@@ -124,7 +124,7 @@ export default function LibraryTree({
         )
       })}
       {files.length > 0 && (
-        <div className="min-h-[240px] max-h-[calc(100dvh-18rem)] space-y-3 overflow-y-auto pr-1">
+        <div className="space-y-3">
           {files.map((file) => (
             isPlayableFile(file) ? (
               <LibraryAudioCard

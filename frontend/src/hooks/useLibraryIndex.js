@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { requestJson } from '../api/client'
 
-const LIBRARY_POLL_INTERVAL_MS = 1500
+// Poll rápido con actividad (descargas/búsquedas); lento en reposo.
+const FAST_INTERVAL_MS = 2500
+const SLOW_INTERVAL_MS = 20000
 
-export function useLibraryIndex() {
+export function useLibraryIndex({ active = true } = {}) {
   const [libraryIndex, setLibraryIndex] = useState(null)
+  const activeRef = useRef(active)
+
+  useEffect(() => {
+    activeRef.current = active
+  }, [active])
 
   const fetchLibraryIndex = useCallback(async () => {
     try {
@@ -20,7 +27,7 @@ export function useLibraryIndex() {
     const tick = async () => {
       if (!cancelled) await fetchLibraryIndex()
       if (cancelled) return
-      timer = setTimeout(tick, LIBRARY_POLL_INTERVAL_MS)
+      timer = setTimeout(tick, activeRef.current ? FAST_INTERVAL_MS : SLOW_INTERVAL_MS)
     }
 
     timer = setTimeout(tick, 0)

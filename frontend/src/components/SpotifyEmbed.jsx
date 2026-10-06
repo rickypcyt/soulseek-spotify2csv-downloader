@@ -59,7 +59,7 @@ export default function SpotifyEmbed({
             key={reloadKey}
             controls
             src={previewUrl}
-            preload="metadata"
+            preload="none"
             className="h-8 min-w-0 flex-1"
           />
           <button

@@ -50,7 +50,7 @@ export default function PlaylistTabBar({ tabs, activeKey, meta = {}, onSelect, o
                 event.stopPropagation()
                 onRefresh(tab.key)
               }}
-              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[#3A3F4E] hover:text-[#FFFFFF] ${isActive ? 'text-[#8D93A6]' : 'text-[#565C6E] opacity-0 group-hover:opacity-100'}`}
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[#3A3F4E] hover:text-[#FFFFFF] ${isActive ? 'text-[#8D93A6]' : 'text-[#565C6E]'}`}
             >
               <RefreshCw size={11} />
             </button>
@@ -62,7 +62,7 @@ export default function PlaylistTabBar({ tabs, activeKey, meta = {}, onSelect, o
                 event.stopPropagation()
                 onClose(tab.key)
               }}
-              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[#3A3F4E] hover:text-[#FFFFFF] ${isActive ? 'text-[#8D93A6]' : 'text-[#565C6E] opacity-0 group-hover:opacity-100'}`}
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-[#3A3F4E] hover:text-[#FFFFFF] ${isActive ? 'text-[#8D93A6]' : 'text-[#565C6E]'}`}
             >
               <X size={11} />
             </button>
