@@ -1,4 +1,4 @@
-import { Download, FileDown, FilePenLine, FolderOpen, ImagePlus, Music, Pencil, Trash2 } from 'lucide-react'
+import { Download, FileDown, FilePenLine, FolderOpen, ImagePlus, Music, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { toast } from 'react-toastify'
 import PlaylistSelectModal from './PlaylistSelectModal'
@@ -87,6 +87,21 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
         {bpmDisplay}
       </div>
     </div>
+  )
+
+  const reloadButton = (
+    <button
+      type="button"
+      onClick={() => {
+        audioRef.current?.pause()
+        audioRef.current?.load()
+      }}
+      aria-label={`Recargar audio de ${file.name}`}
+      title="Recargar audio"
+      className="flex h-7 w-7 !min-h-7 min-w-7 shrink-0 items-center justify-center rounded !p-0 border border-[#2C303D] text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
+    >
+      <RefreshCw size={13} strokeWidth={2} />
+    </button>
   )
 
   const deleteButton = (
@@ -389,7 +404,6 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
             onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
             className="h-8 min-w-0 flex-1"
           />
-          {deleteButton}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {quickSaveButton}
@@ -401,6 +415,8 @@ export default function LibraryAudioCard({ file, streamUrl, downloadUrl, onDownl
           {moveButton}
           {revealButton}
           {downloadButton}
+          {reloadButton}
+          {deleteButton}
         </div>
       </div>
     </div>

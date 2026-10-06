@@ -102,6 +102,11 @@ def initialize_database(legacy_root: Path | None = None, db_path: Path = DB_PATH
                 format_filters TEXT NOT NULL DEFAULT '["mp3", "wav", "aiff", "flac"]',
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS playlist_snapshots (
+                playlist_key TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         # Migración: añadir columna 'ignored' si no existe (DBs existentes)
@@ -348,6 +353,29 @@ def save_logs(messages: list[str], db_path: Path = DB_PATH) -> None:
         )
 
 
+# ---- generic metadata ------------------------------------------------------
+def get_metadata_value(key: str, default: Any = None, db_path: Path = DB_PATH) -> Any:
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        row = connection.execute("SELECT value FROM metadata WHERE key = ?", (str(key),)).fetchone()
+    if not row:
+        return default
+    try:
+        return json.loads(row["value"])
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+def set_metadata_value(key: str, value: Any, db_path: Path = DB_PATH) -> None:
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO metadata(key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (str(key), json.dumps(value)),
+        )
+
+
 # ---- last playlist ---------------------------------------------------------
 def load_last_playlist(db_path: Path = DB_PATH) -> dict[str, Any]:
     initialize_database(db_path=db_path)
@@ -368,6 +396,47 @@ def save_last_playlist(data: dict[str, Any], db_path: Path = DB_PATH) -> None:
             "INSERT INTO last_playlist(id, data, updated_at) VALUES (1, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
             (json.dumps(data), _now()),
+        )
+
+
+# ---- playlist snapshots (pestañas abiertas) ---------------------------------
+def load_playlist_snapshot(playlist_key: str, db_path: Path = DB_PATH) -> dict[str, Any]:
+    if not playlist_key:
+        return {}
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT data FROM playlist_snapshots WHERE playlist_key = ?",
+            (str(playlist_key),),
+        ).fetchone()
+    if not row:
+        return {}
+    try:
+        return json.loads(row["data"])
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def save_playlist_snapshot(playlist_key: str, data: dict[str, Any], db_path: Path = DB_PATH) -> None:
+    if not playlist_key:
+        return
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO playlist_snapshots(playlist_key, data, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(playlist_key) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
+            (str(playlist_key), json.dumps(data), _now()),
+        )
+
+
+def delete_playlist_snapshot(playlist_key: str, db_path: Path = DB_PATH) -> None:
+    if not playlist_key:
+        return
+    initialize_database(db_path=db_path)
+    with _connect(db_path) as connection:
+        connection.execute(
+            "DELETE FROM playlist_snapshots WHERE playlist_key = ?",
+            (str(playlist_key),),
         )
 
 

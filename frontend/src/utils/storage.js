@@ -103,6 +103,59 @@ export async function saveLastPlaylist(playlist) {
   } catch {}
 }
 
+// ---- playlist tabs ---------------------------------------------------------
+export async function loadPlaylistTabs() {
+  try {
+    const data = await requestJson('/api/storage/playlist-tabs')
+    return {
+      tabs: Array.isArray(data?.tabs) ? data.tabs.filter((t) => t && t.key && t.url) : [],
+      active: data?.active || null,
+    }
+  } catch {
+    return { tabs: [], active: null }
+  }
+}
+
+export async function savePlaylistTabs(tabs, active) {
+  try {
+    await request('/api/storage/playlist-tabs', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tabs, active }),
+    })
+  } catch {}
+}
+
+// ---- playlist snapshots (tracks por pestaña) --------------------------------
+export async function loadPlaylistSnapshot(playlistKey) {
+  if (!playlistKey) return {}
+  try {
+    return await requestJson(`/api/storage/playlist-snapshot?playlist_key=${encodeURIComponent(playlistKey)}`)
+  } catch {
+    return {}
+  }
+}
+
+export async function savePlaylistSnapshot(playlistKey, snapshot) {
+  if (!playlistKey) return
+  try {
+    await request('/api/storage/playlist-snapshot', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlist_key: playlistKey, snapshot }),
+    })
+  } catch {}
+}
+
+export async function deletePlaylistSnapshot(playlistKey) {
+  if (!playlistKey) return
+  try {
+    await request(`/api/storage/playlist-snapshot?playlist_key=${encodeURIComponent(playlistKey)}`, {
+      method: 'DELETE',
+    })
+  } catch {}
+}
+
 // ---- output folder preferences ---------------------------------------------
 export async function getOutputFolderPreference(url) {
   if (!url) return undefined

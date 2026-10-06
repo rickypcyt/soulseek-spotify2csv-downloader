@@ -23,7 +23,7 @@ export default function AppNavbar({ activeTab, navigate, libraryCount, pendingDo
   )
 
   return (
-    <header className="sticky top-0 z-30 mb-8 rounded-xl border border-[#2C303D] bg-[#161822] px-4 py-3 sm:px-5">
+    <header className="rounded-xl border border-[#2C303D] bg-[#161822] px-4 py-3 sm:px-5">
       <div className="flex flex-wrap items-center gap-4">
         <nav className="order-3 flex w-full flex-wrap items-center gap-1 border-t border-[#2C303D] pt-3 sm:order-2 sm:flex-nowrap sm:w-auto sm:flex-1 sm:justify-between sm:border-0 sm:pt-0" aria-label="Secciones">
           <div className="flex shrink-0 items-center gap-1">

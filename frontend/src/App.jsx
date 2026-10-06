@@ -8,103 +8,98 @@ import ConfigurationStatus from './components/ConfigurationStatus'
 import LibraryPanel from './components/LibraryPanel'
 import LogsPanel from './components/LogsPanel'
 import PlaylistPicker from './components/PlaylistPicker'
-import PlaylistSelectModal from './components/PlaylistSelectModal'
+import PlaylistSession from './components/PlaylistSession'
+import PlaylistTabBar from './components/PlaylistTabBar'
 import RecommendConfig from './components/RecommendConfig'
 import SettingsPanel from './components/SettingsPanel'
 import SourceInput from './components/SourceInput'
 import TemporalesPanel from './components/TemporalesPanel'
-import TrackList from './components/TrackList'
+import TransfersPanel from './components/TransfersPanel'
 import WelcomeWizard from './components/WelcomeWizard'
-import { FONT_BODY, PREVIEW_PAGE_SIZE, isCompletedTransfer, isLibraryFile } from './constants'
-import { pickBest, rankResults } from './utils/resultPicker'
-import { getSpotifyTrackId, matchesLibraryFile, trackIdentity } from './utils/spotify'
+import { FONT_BODY, isCompletedTransfer, isLibraryFile } from './constants'
 import {
-  getHistoryLabel,
   loadHistory,
   loadLastPlaylist,
-  loadSearchCache,
+  loadPlaylistTabs,
   loadSearchPreferences,
   saveHistory,
-  saveLastPlaylist,
+  savePlaylistTabs,
+  deletePlaylistSnapshot,
   saveSearchPreferences,
 } from './utils/storage'
 import { useConfig } from './hooks/useConfig'
 import { useDiagnostics } from './hooks/useDiagnostics'
-import { useDownloads } from './hooks/useDownloads'
 import { useLibraryIndex } from './hooks/useLibraryIndex'
 import { useLibraryOps } from './hooks/useLibraryOps'
 import { useLogs } from './hooks/useLogs'
-import { usePreview } from './hooks/usePreview'
-import { useSearches } from './hooks/useSearches'
 import { useSpotifyAuth } from './hooks/useSpotifyAuth'
 import { useTabNavigation } from './hooks/useTabNavigation'
 
+const playlistTabKey = (provider, url) => `${provider || 'spotify'}::${url}`
+
 function App() {
   const [bootstrapped, setBootstrapped] = useState(false)
-  const [initialPlaylist, setInitialPlaylist] = useState({})
-  const [url, setUrl] = useState('')
+  const [inputUrl, setInputUrl] = useState('')
   const [searchProvider, setSearchProvider] = useState('spotify')
-  const [outputFolderName, setOutputFolderName] = useState('')
-  const [tracks, setTracks] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [manualDownloadedTracks, setManualDownloadedTracks] = useState(() => new Set())
-  const [ignoredTracks, setIgnoredTracks] = useState(() => new Set())
-  const [selected, setSelected] = useState(new Set())
   const [urlHistory, setUrlHistory] = useState([])
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([])
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false)
-  const [currentPlaylistName, setCurrentPlaylistName] = useState('')
   // Carpeta elegida manualmente para una playlist (override del nombre).
   const [folderOverrides, setFolderOverrides] = useState(() => {
     try { return JSON.parse(localStorage.getItem('playlist_folder_overrides') || '{}') } catch { return {} }
   })
-  const [missingFolder, setMissingFolder] = useState(null)   // { save, folder, playlistName }
-  const [relocateFolder, setRelocateFolder] = useState(null) // { save, playlistName }
-  const [previewPage, setPreviewPage] = useState(1)
+
   const [completedTransfersOpen, setCompletedTransfersOpen] = useState(false)
   const [pickMode, setPickMode] = useState('quality')
   const [formatPref, setFormatPref] = useState('any')
   const [formatFilters, setFormatFilters] = useState(['mp3', 'wav', 'aiff', 'flac'])
-  const [initialSearches, setInitialSearches] = useState([])
   const [welcomeDismissed, setWelcomeDismissed] = useState(
     () => localStorage.getItem('welcome_dismissed') === '1'
   )
+  // ---- playlist tabs ----
+  const [playlistTabs, setPlaylistTabs] = useState([])
+  const [activePlaylistKey, setActivePlaylistKey] = useState(null)
+  const [tabRefreshTicks, setTabRefreshTicks] = useState({})
+  const [sessionMeta, setSessionMeta] = useState({})
+  const [seededSnapshots, setSeededSnapshots] = useState({})
+  const sessionHandlers = useRef({})
   const logRef = useRef(null)
-  const downloadSelectedTimers = useRef([])
 
   // Cargar estado inicial desde SQLite (vía API) al montar
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const playlist = await loadLastPlaylist()
-      const history = await loadHistory()
-      const prefs = await loadSearchPreferences()
+      const [tabsData, playlist, history, prefs] = await Promise.all([
+        loadPlaylistTabs(),
+        loadLastPlaylist(),
+        loadHistory(),
+        loadSearchPreferences(),
+      ])
       if (cancelled) return
-      setInitialPlaylist(playlist)
-      setUrl(playlist.url || '')
-      setCurrentPlaylistName(playlist.playlist_name || '')
-      if (cancelled) return
-      setOutputFolderName('')
-      setTracks(playlist.tracks || [])
+      if (tabsData.tabs.length > 0) {
+        setPlaylistTabs(tabsData.tabs)
+        const active = tabsData.tabs.some((t) => t.key === tabsData.active)
+          ? tabsData.active
+          : tabsData.tabs[0].key
+        setActivePlaylistKey(active)
+        const activeTab = tabsData.tabs.find((t) => t.key === active)
+        if (activeTab) setInputUrl(activeTab.url)
+      } else if (playlist.url) {
+        // Migración: la última playlist abierta se convierte en la primera tab.
+        const key = playlistTabKey(playlist.provider || 'spotify', playlist.url)
+        const tab = { key, url: playlist.url, provider: playlist.provider || 'spotify', name: playlist.playlist_name || '' }
+        setPlaylistTabs([tab])
+        setActivePlaylistKey(key)
+        setInputUrl(playlist.url)
+        setSeededSnapshots({ [key]: playlist })
+      }
       setUrlHistory(history)
       setPickMode(prefs.pickMode)
       setFormatPref(prefs.formatPref)
       setFormatFilters(prefs.formatFilters)
-      const cached = await loadSearchCache(playlist.url || '', playlist.tracks || [])
-      if (cancelled) return
-      setInitialSearches(cached)
       setBootstrapped(true)
     })()
     return () => { cancelled = true }
-  }, [])
-
-  // Limpiar timeouts pendientes de descarga masiva al desmontar.
-  useEffect(() => {
-    return () => {
-      downloadSelectedTimers.current.forEach(clearTimeout)
-      downloadSelectedTimers.current = []
-    }
   }, [])
 
   // ---- composed hooks ----
@@ -116,49 +111,113 @@ function App() {
   const { spotifyAuth, startSpotifyAuth } = useSpotifyAuth()
 
   const {
-    searches, setSearches, searchTrack, autoSearchAll, refreshSearch, cancelSearch,
-    getTrackSearch, expandedSearches, collapsedSearches,
-    toggleExpandedSearch, toggleCollapsedSearch, collapseTrackResults, resetSearches,
-  } = useSearches({
-    tracks,
-    url,
-    initialSearches,
-  })
-
-  const { downloads, enqueueDownload, cancelTrackDownload, getTrackDownloads, resetDownloads } = useDownloads({
-    tracks,
-    outputFolderName,
-    playlistKey: url,
-    maxConcurrent: config.download_concurrency,
-    fetchDiagnostics,
-    collapseTrackResults,
-  })
-
-  const {
-    previews, startPreview, cancelPreview, savePreviewToLibrary, discardActivePreview,
-  } = usePreview({ tracks, outputFolderName, playlistKey: url, fetchDiagnostics })
-
-  const {
     newLibraryFolderName, setNewLibraryFolderName, dragOverLibraryFolder, setDragOverLibraryFolder,
     deleteItem, cleanupAll, cancelTransfer, saveTemporaryPreviewToLibrary, moveLibraryFile, renameLibraryFile, createLibraryFolder,
-  } = useLibraryOps({ outputFolderName, fetchDiagnostics })
+  } = useLibraryOps({ fetchDiagnostics })
 
-  const saveSpotifyPreviewToLibrary = useCallback(async (preview, folderName) => {
-    try {
-      const data = await requestJson('/api/spotify/preview/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          preview_url: preview.previewUrl,
-          track_name: preview.trackName,
-          artists: preview.artists,
-        }),
-      })
-      await saveTemporaryPreviewToLibrary(data.path, folderName)
-    } catch (error) {
-      toast.error(`No se pudo guardar el preview de Spotify: ${error.message}`)
+  // ---- playlist tabs ----
+  const openPlaylist = useCallback((rawUrl, provider) => {
+    const target = (rawUrl || '').trim()
+    if (!target) return
+    const key = playlistTabKey(provider, target)
+    setPlaylistTabs((prev) => {
+      if (prev.some((t) => t.key === key)) return prev
+      return [...prev, { key, url: target, provider: provider || 'spotify', name: '' }]
+    })
+    setActivePlaylistKey(key)
+    setInputUrl(target)
+  }, [])
+
+  const selectPlaylistTab = useCallback((key) => {
+    setActivePlaylistKey(key)
+    const tab = playlistTabs.find((t) => t.key === key)
+    if (tab) setInputUrl(tab.url)
+    if (activeTab !== 'main') navigate('/')
+  }, [playlistTabs, activeTab, navigate])
+
+  const closePlaylistTab = useCallback((key) => {
+    const index = playlistTabs.findIndex((t) => t.key === key)
+    const next = playlistTabs.filter((t) => t.key !== key)
+    if (activePlaylistKey === key) {
+      const fallback = next[Math.min(Math.max(index, 0), next.length - 1)]
+      setActivePlaylistKey(fallback ? fallback.key : null)
+      setInputUrl(fallback ? fallback.url : '')
     }
-  }, [saveTemporaryPreviewToLibrary])
+    setPlaylistTabs(next)
+    delete sessionHandlers.current[key]
+    setSessionMeta((prev) => {
+      const nextMeta = { ...prev }
+      delete nextMeta[key]
+      return nextMeta
+    })
+    deletePlaylistSnapshot(key)
+  }, [playlistTabs, activePlaylistKey])
+
+  const refreshPlaylistTab = useCallback((key) => {
+    setTabRefreshTicks((prev) => ({ ...prev, [key]: (prev[key] || 0) + 1 }))
+  }, [])
+
+  const handleSessionMeta = useCallback((key, meta) => {
+    setSessionMeta((prev) => {
+      const current = prev[key]
+      if (current
+        && current.name === meta.name
+        && current.loading === meta.loading
+        && current.trackCount === meta.trackCount
+        && current.queued === meta.queued
+        && current.active === meta.active
+        && current.searches === meta.searches
+        && current.quickSaveFolder === meta.quickSaveFolder) {
+        return prev
+      }
+      return { ...prev, [key]: meta }
+    })
+  }, [])
+
+  const handleSessionRegister = useCallback((key, handlers) => {
+    sessionHandlers.current[key] = handlers
+  }, [])
+
+  const handleHistoryAdd = useCallback((entry) => {
+    if (!entry?.url) return
+    setUrlHistory((prev) => {
+      const next = [entry, ...prev.filter((item) => item.url !== entry.url)]
+      queueMicrotask(() => saveHistory(next))
+      return next
+    })
+  }, [])
+
+  // Persistir tabs abiertas + activa.
+  useEffect(() => {
+    if (!bootstrapped) return
+    savePlaylistTabs(playlistTabs, activePlaylistKey)
+  }, [bootstrapped, playlistTabs, activePlaylistKey])
+
+  // ---- effects ----
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logs])
+
+  useEffect(() => {
+    if (!bootstrapped) return
+    saveSearchPreferences(pickMode, formatPref, formatFilters)
+  }, [bootstrapped, pickMode, formatPref, formatFilters])
+
+  // ---- playlist loading / picking ----
+  const preview = (event) => {
+    event.preventDefault()
+    openPlaylist(inputUrl, searchProvider)
+  }
+
+  const loadSpotifyPlaylists = async () => {
+    try {
+      const data = await requestJson('/api/spotify/playlists')
+      setSpotifyPlaylists(data.playlists || [])
+      setPlaylistPickerOpen(true)
+    } catch (err) {
+      toast.error('No se pudieron cargar tus playlists: ' + err.message)
+    }
+  }
 
   const embedCoverInFile = useCallback(async (path, coverUrl) => {
     try {
@@ -175,10 +234,6 @@ function App() {
       toast.error(`No se pudo insertar la portada: ${error.message}`)
     }
   }, [fetchDiagnostics, fetchLibraryIndex])
-
-  const embedDownloadCover = useCallback((download, track) => {
-    return embedCoverInFile(download.path, track.cover_url)
-  }, [embedCoverInFile])
 
   const revealFile = useCallback(async (path, dir = 'downloads') => {
     try {
@@ -284,218 +339,9 @@ function App() {
     }
   }, [fetchDiagnostics, fetchLibraryIndex])
 
-  // ---- effects: playlist persistence & preferences ----
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [logs])
-
-  // Guardar playlist actual cuando cambia
-  useEffect(() => {
-    if (url && tracks.length > 0) {
-      saveLastPlaylist({ url, tracks, outputFolderName, playlist_name: currentPlaylistName })
-    }
-  }, [url, tracks, outputFolderName, currentPlaylistName])
-
-  useEffect(() => {
-    if (!url) return undefined
-    let cancelled = false
-    requestJson(`/api/playlist/status?playlist_key=${encodeURIComponent(url)}`)
-      .then((data) => {
-        if (cancelled) return
-        const statuses = data.statuses || {}
-        setManualDownloadedTracks(new Set(
-          Object.entries(statuses)
-            .filter(([, info]) => info && info.downloaded)
-            .map(([trackKey]) => trackKey)
-        ))
-        setIgnoredTracks(new Set(
-          Object.entries(statuses)
-            .filter(([, info]) => info && info.ignored)
-            .map(([trackKey]) => trackKey)
-        ))
-      })
-      .catch(() => {})
-    return () => {
-      cancelled = true
-    }
-  }, [url])
-
-  useEffect(() => {
-    if (!bootstrapped) return
-    saveSearchPreferences(pickMode, formatPref, formatFilters)
-  }, [bootstrapped, pickMode, formatPref, formatFilters])
-
-  // ---- playlist loading ----
-  const loadPlaylist = useCallback(async (sourceUrl) => {
-    const targetUrl = (sourceUrl || '').trim()
-    if (!targetUrl || loading) return
-    setUrl(targetUrl)
-    setOutputFolderName('')
-    resetSearches()
-    resetDownloads()
-    setLoading(true)
-    setError('')
-    setTracks([])
-    try {
-      const r = await request('/api/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: targetUrl, provider: searchProvider }),
-      })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.error || 'Error')
-      const loaded = data.tracks || []
-      setCurrentPlaylistName(data.source === 'spotify' ? (data.playlist_name || '') : '')
-      const cachedSearches = await loadSearchCache(targetUrl, loaded)
-      setSearches(cachedSearches)
-      setTracks(loaded)
-      setSelected(new Set(loaded.map((_, i) => i)))
-      if (data.source !== 'soulseek') {
-        const historyItem = {
-          url: targetUrl,
-          name: data.playlist_name || getHistoryLabel(targetUrl, 0),
-        }
-        const next = [historyItem, ...urlHistory.filter((item) => item.url !== targetUrl)]
-        setUrlHistory(next)
-        saveHistory(next)
-      }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }, [loading, searchProvider, resetSearches, resetDownloads, setSearches, urlHistory])
-
-  const preview = (event) => {
-    event.preventDefault()
-    loadPlaylist(url)
-  }
-
-  const loadSpotifyPlaylists = async () => {
-    try {
-      const data = await requestJson('/api/spotify/playlists')
-      setSpotifyPlaylists(data.playlists || [])
-      setPlaylistPickerOpen(true)
-    } catch (err) {
-      toast.error('No se pudieron cargar tus playlists: ' + err.message)
-    }
-  }
-
-  // ---- track interactions ----
-  const copy = (q) =>
-    navigator.clipboard.writeText(q).then(() => toast.success('Copiado: ' + q)).catch(() => toast.error('No se pudo copiar'))
-
-  const updateQuery = (i, newQuery) => {
-    setTracks((prev) =>
-      prev.map((track, index) =>
-        index === i ? { ...track, search_query: newQuery } : track
-      )
-    )
-  }
-
-  const toggleSelect = (i) =>
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(i)) next.delete(i)
-      else next.add(i)
-      return next
-    })
-
-  const selectAll = (checked) =>
-    setSelected(checked ? new Set(tracks.map((_, i) => i)) : new Set())
-
-  const downloadSelected = () => {
-    const list = tracks.map((_, i) => i).filter((i) => selected.has(i))
-    downloadSelectedTimers.current.forEach(clearTimeout)
-    downloadSelectedTimers.current = []
-    list.forEach((i, n) => {
-      const s = getTrackSearch(i)
-      const results = rankResults(s?.raw?.results || [], s?.query, pickMode, formatPref, formatFilters)
-      const best = pickBest(results, pickMode, formatPref, formatFilters)
-      if (best) {
-        const id = setTimeout(() => enqueueDownload(i, best), n * 400)
-        downloadSelectedTimers.current.push(id)
-      }
-    })
-  }
-
-  const isTrackDownloaded = (track) => {
-    const trackKey = getSpotifyTrackId(track.spotify_url)
-    // Búsqueda Soulseek de texto libre: track_name es el propio texto buscado,
-    // no un track real; el estado "descargada" solo aplica a tracks de Spotify.
-    if (!trackKey) return false
-    if (libraryIndex?.[trackKey]) return true
-    if (diagnostics?.library_index?.[trackKey]) return true
-    return (diagnostics?.downloads || [])
-      .filter(isLibraryFile)
-      .some((file) => matchesLibraryFile(track, file))
-  }
-
-  const toggleManualDownloaded = async (track, trackIndex) => {
-    if (!url) return
-    const key = trackIdentity(track)
-    const wasManual = manualDownloadedTracks.has(key)
-    const downloaded = !wasManual
-    if (downloaded) collapseTrackResults(trackIndex)
-    setManualDownloadedTracks((current) => {
-      const next = new Set(current)
-      if (downloaded) next.add(key)
-      else next.delete(key)
-      return next
-    })
-    try {
-      await requestJson('/api/playlist/status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlist_key: url, track_key: key, downloaded }),
-      })
-      toast[downloaded ? 'success' : 'info'](downloaded ? `Marcada como descargada: ${track.track_name}` : `Marcada como pendiente: ${track.track_name}`)
-    } catch (err) {
-      setManualDownloadedTracks((current) => {
-        const next = new Set(current)
-        if (wasManual) next.add(key)
-        else next.delete(key)
-        return next
-      })
-      toast.error('No se pudo guardar el estado de la canción: ' + err.message)
-    }
-  }
-
-  const toggleIgnored = async (track, trackIndex) => {
-    if (!url) return
-    const key = trackIdentity(track)
-    const wasIgnored = ignoredTracks.has(key)
-    const ignored = !wasIgnored
-    setIgnoredTracks((current) => {
-      const next = new Set(current)
-      if (ignored) next.add(key)
-      else next.delete(key)
-      return next
-    })
-    try {
-      await requestJson('/api/playlist/status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlist_key: url, track_key: key, ignored }),
-      })
-      toast[ignored ? 'info' : 'info'](ignored ? `Ignorada: ${track.track_name}` : `Restaurada: ${track.track_name}`)
-    } catch (err) {
-      setIgnoredTracks((current) => {
-        const next = new Set(current)
-        if (wasIgnored) next.add(key)
-        else next.delete(key)
-        return next
-      })
-      toast.error('No se pudo guardar el estado: ' + err.message)
-    }
-  }
-
   const selectHistory = async (selectedUrl) => {
     const saved = urlHistory.find((item) => item.url === selectedUrl)
-    if (saved) {
-      setUrl(saved.url)
-      setOutputFolderName('')
-    }
+    if (saved) setInputUrl(saved.url)
   }
 
   const clearHistory = () => {
@@ -521,6 +367,14 @@ function App() {
     return data
   }, [fetchDiagnostics])
 
+  const rememberFolderOverride = (playlistName, folder) => {
+    setFolderOverrides((current) => {
+      const next = { ...current, [playlistName]: folder }
+      try { localStorage.setItem('playlist_folder_overrides', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
+
   // ---- derived values for the library / temporales panels ----
   const libraryFiles = useMemo(
     () => (diagnostics?.downloads || []).filter(isLibraryFile).sort((a, b) => a.path.localeCompare(b.path)),
@@ -532,51 +386,14 @@ function App() {
     ...libraryFiles.map((file) => file.path),
   ].map((path) => String(path).split('/').filter(Boolean)[0]).filter((name) => name && !['temp', '.incomplete'].includes(name.toLowerCase())))].sort((a, b) => a.localeCompare(b))
 
-  // Guardado rápido: la playlist cargada tiene una carpeta destino (su propio
-  // nombre o la carpeta que el usuario ubicó manualmente para ella).
-  const quickSaveFolder = currentPlaylistName
-    ? (folderOverrides[currentPlaylistName] || currentPlaylistName)
-    : ''
-
-  const rememberFolderOverride = (playlistName, folder) => {
-    setFolderOverrides((current) => {
-      const next = { ...current, [playlistName]: folder }
-      try { localStorage.setItem('playlist_folder_overrides', JSON.stringify(next)) } catch {}
-      return next
-    })
+  // Guardado rápido de temporales desde SourceInput: usa la carpeta de la tab activa.
+  const activeSessionMeta = activePlaylistKey ? sessionMeta[activePlaylistKey] : null
+  const quickSaveTempFromInput = (path) => {
+    const handler = sessionHandlers.current[activePlaylistKey]
+    if (!handler) return false
+    return handler.quickSaveTempFile(path)
   }
 
-  const quickSavePreview = (preview) => {
-    if (!quickSaveFolder) return
-    // La carpeta puede existir con distinto case (Windows no distingue).
-    const existing = localPlaylists.find(
-      (name) => name.toLowerCase() === quickSaveFolder.toLowerCase()
-    )
-    if (existing) {
-      savePreviewToLibrary(preview, existing)
-    } else {
-      setMissingFolder({
-        save: (folder) => savePreviewToLibrary(preview, folder),
-        folder: quickSaveFolder,
-        playlistName: currentPlaylistName,
-      })
-    }
-  }
-
-  // Mismo guardado rápido para archivos temporales (previews, YouTube, SoundCloud).
-  const quickSaveTempFile = (path) => {
-    if (!quickSaveFolder) return false
-    const existing = localPlaylists.find(
-      (name) => name.toLowerCase() === quickSaveFolder.toLowerCase()
-    )
-    if (existing) return saveTemporaryPreviewToLibrary(path, existing)
-    setMissingFolder({
-      save: (folder) => saveTemporaryPreviewToLibrary(path, folder),
-      folder: quickSaveFolder,
-      playlistName: currentPlaylistName,
-    })
-    return true
-  }
   const coverByPath = useMemo(() => {
     const map = {}
     if (libraryIndex) {
@@ -631,19 +448,10 @@ function App() {
     return map
   }, [libraryIndex])
   const previewFiles = diagnostics?.previews || []
-  const previewPages = Math.max(1, Math.ceil(previewFiles.length / PREVIEW_PAGE_SIZE))
-  const currentPreviewPage = Math.min(previewPage, previewPages)
-  const visiblePreviewFiles = previewFiles.slice((currentPreviewPage - 1) * PREVIEW_PAGE_SIZE, currentPreviewPage * PREVIEW_PAGE_SIZE)
-  const downloadEntries = useMemo(
-    () => Object.values(downloads).flatMap((value) => Array.isArray(value) ? value : value ? [value] : []),
-    [downloads]
-  )
-  const queuedDownloadCount = downloadEntries.filter((download) => download.state === 'encolando').length
-  const activeDownloadCount = downloadEntries.filter((download) => download.state === 'descargando').length
+  const queuedDownloadCount = Object.values(sessionMeta).reduce((sum, m) => sum + (m?.queued || 0), 0)
+  const activeDownloadCount = Object.values(sessionMeta).reduce((sum, m) => sum + (m?.active || 0), 0)
   const pendingDownloadCount = queuedDownloadCount + activeDownloadCount
-  const activeSearchCount = searches.filter(
-    (s) => s.searchId && !s.raw?.isComplete && !['completed', 'complete', 'finished', 'failed', 'error', 'cancelled', 'canceled'].includes(String(s.status || '').toLowerCase())
-  ).length
+  const activeSearchCount = Object.values(sessionMeta).reduce((sum, m) => sum + (m?.searches || 0), 0)
   const transfers = diagnostics?.transfers || []
   const activeTransfers = transfers.filter((transfer) => !isCompletedTransfer(transfer))
   const completedTransfers = transfers.filter(isCompletedTransfer)
@@ -654,22 +462,33 @@ function App() {
       style={{ fontFamily: FONT_BODY }}
     >
       <div className="w-full px-5 py-8 sm:px-10 sm:py-10">
-        <AppNavbar
-          activeTab={activeTab}
-          navigate={navigate}
-          libraryCount={libraryFiles.length}
-          pendingDownloadCount={pendingDownloadCount}
-          queuedDownloadCount={queuedDownloadCount}
-          activeDownloadCount={activeDownloadCount}
-          activeSearchCount={activeSearchCount}
-        />
+        {/* Barra superior fija: navegación + tabs de playlists siempre visibles */}
+        <div className="sticky top-0 z-30 mb-8 bg-[#10121A] pb-2">
+          <AppNavbar
+            activeTab={activeTab}
+            navigate={navigate}
+            libraryCount={libraryFiles.length}
+            pendingDownloadCount={pendingDownloadCount}
+            queuedDownloadCount={queuedDownloadCount}
+            activeDownloadCount={activeDownloadCount}
+            activeSearchCount={activeSearchCount}
+          />
+          <PlaylistTabBar
+            tabs={playlistTabs}
+            activeKey={activePlaylistKey}
+            meta={sessionMeta}
+            onSelect={selectPlaylistTab}
+            onClose={closePlaylistTab}
+            onRefresh={refreshPlaylistTab}
+          />
+        </div>
 
         {activeTab === 'main' && (
           <>
             <SourceInput
-              url={url}
-              onUrlChange={setUrl}
-              loading={loading}
+              url={inputUrl}
+              onUrlChange={setInputUrl}
+              loading={false}
               onSubmit={preview}
               onLoadSpotifyPlaylists={loadSpotifyPlaylists}
               spotifyAuthStatus={spotifyAuth.status}
@@ -680,8 +499,8 @@ function App() {
               onClearHistory={clearHistory}
               onDownloadCompleted={fetchDiagnostics}
               localPlaylists={localPlaylists}
-              quickSaveLabel={quickSaveFolder}
-              onQuickSaveTemp={quickSaveTempFile}
+              quickSaveLabel={activeSessionMeta?.quickSaveFolder || ''}
+              onQuickSaveTemp={quickSaveTempFromInput}
               onSaveTemp={saveTemporaryPreviewToLibrary}
               onDeleteTemp={(path) => deleteItem(path, 'previews')}
               storedFileStreamUrl={storedFileStreamUrl}
@@ -694,16 +513,10 @@ function App() {
               onClose={() => setPlaylistPickerOpen(false)}
               onSelect={(playlistUrl) => {
                 setPlaylistPickerOpen(false)
-                loadPlaylist(playlistUrl)
+                openPlaylist(playlistUrl, 'spotify')
               }}
             />
           </>
-        )}
-
-        {activeTab === 'main' && error && (
-          <div className="mb-6 rounded-md border border-[#6B7280]/30 bg-[#6B7280]/10 px-4 py-2.5 text-sm text-[#6B7280]">
-            {error}
-          </div>
         )}
 
         {(activeTab === 'settings' || activeTab === 'main') && (
@@ -746,71 +559,59 @@ function App() {
           </div>
         )}
         <div className={`grid grid-cols-1 gap-8 ${activeTab === 'main' ? 'lg:grid-cols-1' : 'lg:grid-cols-1'}`}>
+          {/* Las sesiones quedan montadas aunque cambies de tab para que las
+              búsquedas y descargas sigan en segundo plano. */}
           <div className={`min-w-0 ${activeTab === 'main' ? '' : 'hidden'}`}>
-            <TrackList
-              tracks={tracks}
-              localPlaylists={localPlaylists}
-              formatFilters={formatFilters}
-              loading={loading}
-              selected={selected}
-              onSelectAll={selectAll}
-              onDownloadSelected={downloadSelected}
-              onAutoSearchAll={autoSearchAll}
-              getTrackSearch={getTrackSearch}
-              isTrackDownloaded={isTrackDownloaded}
-              manualDownloadedTracks={manualDownloadedTracks}
-              ignoredTracks={ignoredTracks}
-              trackIdentity={trackIdentity}
-              getTrackDownloads={getTrackDownloads}
-              getSpotifyTrackId={getSpotifyTrackId}
-              onToggleSelect={toggleSelect}
-              onToggleManualDownloaded={toggleManualDownloaded}
-              onToggleIgnored={toggleIgnored}
-              onUpdateQuery={updateQuery}
-              onCopy={copy}
-              onSearchTrack={searchTrack}
-              pickMode={pickMode}
-              formatPref={formatPref}
-              expandedSearches={expandedSearches}
-              onToggleExpandedSearch={toggleExpandedSearch}
-              collapsedSearches={collapsedSearches}
-              onToggleCollapsedSearch={toggleCollapsedSearch}
-              previews={previews}
-              onStartPreview={startPreview}
-              onSavePreview={savePreviewToLibrary}
-              quickSaveLabel={quickSaveFolder}
-              onQuickSavePreview={quickSavePreview}
-              onDiscardPreview={discardActivePreview}
-              onCancelPreview={cancelPreview}
-              onSaveSpotifyPreview={saveSpotifyPreviewToLibrary}
-              storedFileStreamUrl={storedFileStreamUrl}
-              storedFileUrl={storedFileUrl}
-              onCancelDownload={cancelTrackDownload}
-              onEmbedCover={embedDownloadCover}
-              onRefreshSearch={refreshSearch}
-              onCancelSearch={cancelSearch}
-            />
+            {playlistTabs.map((tab) => (
+              <PlaylistSession
+                key={tab.key}
+                session={tab}
+                active={activeTab === 'main' && tab.key === activePlaylistKey}
+                refreshTick={tabRefreshTicks[tab.key] || 0}
+                initialSnapshot={seededSnapshots[tab.key]}
+                onMeta={handleSessionMeta}
+                onRegister={handleSessionRegister}
+                onHistoryAdd={handleHistoryAdd}
+                config={config}
+                diagnostics={diagnostics}
+                libraryIndex={libraryIndex}
+                fetchDiagnostics={fetchDiagnostics}
+                localPlaylists={localPlaylists}
+                folderOverrides={folderOverrides}
+                rememberFolderOverride={rememberFolderOverride}
+                pickMode={pickMode}
+                formatPref={formatPref}
+                formatFilters={formatFilters}
+                saveTemporaryPreviewToLibrary={saveTemporaryPreviewToLibrary}
+                embedCoverInFile={embedCoverInFile}
+                storedFileUrl={storedFileUrl}
+                storedFileStreamUrl={storedFileStreamUrl}
+              />
+            ))}
           </div>
 
           {/* monitor column */}
           <div className={`${activeTab === 'main' ? 'hidden' : activeTab === 'logs' ? 'min-w-0 grid grid-cols-1 gap-4' : 'min-w-0 grid grid-cols-1 gap-4'}`}>
-            <div className={`${activeTab === 'library' ? 'flex min-w-0 h-72' : 'hidden'}`}>
-              <TemporalesPanel
+            <div className={`${activeTab === 'library' ? 'flex min-w-0 h-64' : 'hidden'}`}>
+              <TransfersPanel
                 diagnostics={diagnostics}
                 activeTransfers={activeTransfers}
                 completedTransfers={completedTransfers}
                 completedTransfersOpen={completedTransfersOpen}
                 onToggleCompletedTransfers={setCompletedTransfersOpen}
-                onCleanupAll={cleanupAll}
                 onCancelTransfer={cancelTransfer}
-                visiblePreviewFiles={visiblePreviewFiles}
-                previewFilesCount={previewFiles.length}
-                currentPreviewPage={currentPreviewPage}
-                onPreviewPageChange={setPreviewPage}
+              />
+            </div>
+
+            <div className={`${activeTab === 'library' ? 'flex min-w-0' : 'hidden'}`}>
+              <TemporalesPanel
+                diagnostics={diagnostics}
+                onCleanupAll={cleanupAll}
+                previewFiles={previewFiles}
                 storedFileStreamUrl={storedFileStreamUrl}
                 onSaveTemporaryPreview={saveTemporaryPreviewToLibrary}
-                quickSaveLabel={quickSaveFolder}
-                onQuickSave={quickSaveTempFile}
+                quickSaveLabel={activeSessionMeta?.quickSaveFolder || ''}
+                onQuickSave={quickSaveTempFromInput}
                 localPlaylists={localPlaylists}
                 onSearchCover={(path) => searchAndEmbedCover(path, 'previews')}
                 onRevealFile={(path) => revealFile(path, 'previews')}
@@ -857,72 +658,6 @@ function App() {
           </div>
         </div>
         <AppFooter />
-        {missingFolder && (
-          <div
-            className="fixed inset-0 z-[280] flex items-center justify-center bg-[#000000]/70 p-4 backdrop-blur-sm"
-            onClick={() => setMissingFolder(null)}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              className="w-full max-w-md rounded-xl border border-[#2C303D] bg-[#12141D] p-5 shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <h3 className="text-sm font-semibold text-[#E9EAF0]">
-                No encontré la carpeta “{missingFolder.folder}”
-              </h3>
-              <p className="mt-2 text-xs leading-relaxed text-[#8D93A6]">
-                La playlist “{missingFolder.playlistName}” todavía no tiene carpeta en la biblioteca.
-                Podés crearla ahora o ubicar una existente — si ubicás otra, el botón
-                “guardar” de esta playlist va a usar siempre esa carpeta.
-              </p>
-              <div className="mt-4 flex flex-wrap justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMissingFolder(null)}
-                  className="rounded-full border border-[#3A3F4E] px-4 py-1.5 text-xs font-medium text-[#D5D7DE] transition-colors hover:border-[#FFFFFF]/50 hover:text-[#FFFFFF]"
-                >
-                  cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRelocateFolder({ save: missingFolder.save, playlistName: missingFolder.playlistName })
-                    setMissingFolder(null)
-                  }}
-                  className="rounded-full border border-[#3A3F4E] px-4 py-1.5 text-xs font-medium text-[#D5D7DE] transition-colors hover:border-[#FFFFFF]/50 hover:text-[#FFFFFF]"
-                >
-                  elegir otra carpeta
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    missingFolder.save(missingFolder.folder)
-                    setMissingFolder(null)
-                  }}
-                  className="rounded-full bg-[#1DB954] px-4 py-1.5 text-xs font-semibold text-[#0D0F16] transition-colors hover:bg-[#1ed760]"
-                >
-                  crear y guardar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-        <PlaylistSelectModal
-          open={Boolean(relocateFolder)}
-          playlists={localPlaylists}
-          title="Elegir carpeta destino"
-          subtitle={relocateFolder ? `Para la playlist “${relocateFolder.playlistName}”` : ''}
-          allowEmpty={false}
-          onClose={() => setRelocateFolder(null)}
-          onSelect={(playlist) => {
-            if (relocateFolder && playlist) {
-              rememberFolderOverride(relocateFolder.playlistName, playlist)
-              relocateFolder.save(playlist)
-            }
-            setRelocateFolder(null)
-          }}
-        />
         {(() => {
           const setupIncomplete = !config.downloads_dir || !config.soulseek_username ||
             !config.spotify_client_id || !config.spotify_client_secret_configured
@@ -944,7 +679,7 @@ function App() {
           )
         })()}
         <ToastContainer
-          position="top-left"
+          position="top-right"
           autoClose={6000}
           theme="dark"
           newestOnTop

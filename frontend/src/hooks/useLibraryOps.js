@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { toast } from 'react-toastify'
 import { request, requestJson } from '../api/client'
 
-export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
+export function useLibraryOps({ fetchDiagnostics }) {
   const [newLibraryFolderName, setNewLibraryFolderName] = useState('')
   const [dragOverLibraryFolder, setDragOverLibraryFolder] = useState(null)
 
@@ -49,7 +49,7 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
   }, [fetchDiagnostics])
 
   const saveTemporaryPreviewToLibrary = useCallback(async (path, folderName = '') => {
-    const targetFolder = folderName.trim() || outputFolderName.trim()
+    const targetFolder = folderName.trim()
     if (!targetFolder) {
       toast.info('Escribe una carpeta de playlist para mover el preview')
       return false
@@ -67,7 +67,7 @@ export function useLibraryOps({ outputFolderName, fetchDiagnostics }) {
       toast.error('No se pudo mover a la biblioteca: ' + err.message)
       return false
     }
-  }, [outputFolderName, fetchDiagnostics])
+  }, [fetchDiagnostics])
 
   const movePreviewToFolder = useCallback(async (path, targetFolder) => {
     try {

@@ -37,7 +37,7 @@ export default function LibraryTree({
   const folders = Object.entries(node.folders).sort(([a], [b]) => a.localeCompare(b))
   const files = [...node.files].sort((a, b) => a.name.localeCompare(b.name))
   return (
-    <div className={level > 0 ? 'ml-3 space-y-3 border-l-2 border-[#3A3F4E] pl-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'}>
+    <div className={level > 0 ? 'ml-3 space-y-3 border-l-2 border-[#3A3F4E] pl-3' : 'grid grid-cols-1 gap-3 sm:grid-cols-2'}>
       {folders.map(([name, folder]) => {
         const sourceFolder = fullNode.folders[name] || folder
         const stats = getFolderStats(sourceFolder)
@@ -85,13 +85,13 @@ export default function LibraryTree({
               <span className="min-w-0 flex-1">
                 <span className="block text-[10px] uppercase tracking-[0.14em] text-[#8D93A6]">playlist</span>
                 <span className="mt-0.5 block break-words text-sm font-semibold leading-snug" title={name}>{name}</span>
+                <span className="mt-1 inline-block rounded-full border border-[#3A3F4E] px-2 py-0.5 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
+                  {stats.files} canciones · {formatSize(stats.size)}
+                </span>
               </span>
               {dragOverFolder === destinationFolder && (
                 <span className="shrink-0 rounded-full border border-[#FFFFFF]/60 bg-[#FFFFFF]/10 px-2 py-1 text-[10px] font-medium text-[#FFFFFF]">soltar aquí</span>
               )}
-              <span className="shrink-0 rounded-full border border-[#3A3F4E] px-2 py-1 text-[10px] text-[#8D93A6]" style={{ fontFamily: FONT_MONO }}>
-                {stats.files} canciones · {formatSize(stats.size)}
-              </span>
             </summary>
             <div className="border-t border-[#2C303D] bg-[#0D0F16] p-3">
               <LibraryTree

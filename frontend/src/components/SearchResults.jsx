@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronDown, Clock3 } from 'lucide-react'
+import { ChevronDown, Clock3, RefreshCw } from 'lucide-react'
 import { requestJson } from '../api/client'
 import { Chip } from './ui'
 import PlaylistSelectModal from './PlaylistSelectModal'
@@ -133,14 +133,20 @@ export default function SearchResults({
 
   const results = allResults
   const bestPick = pickBest(allResults, pickMode, formatPref, formatFilters)
+  // Si hay un preview sonando en este bloque no lo cerramos al completarse la
+  // descarga: el reproductor no debe desaparecer mientras se escucha.
+  const hasActivePreview = results.some((res) => {
+    const preview = previews[`${res.username}|${res.filename}`]
+    return preview && preview.state !== 'error'
+  })
   const getDownloadForResult = (res) => trackDownloads.find((download) =>
     download.username === res.username && download.filename === res.filename
   )
 
   return (
     <details
-      key={`${s.searchId}-${trackDownloaded ? 'descargado' : 'pendiente'}`}
-      open={!trackDownloaded && !collapsed}
+      key={s.searchId}
+      open={!collapsed && (!trackDownloaded || hasActivePreview)}
       onToggle={(event) => {
         const isOpen = event.currentTarget.open
         onToggleCollapsed(s.searchId, isOpen)
@@ -240,14 +246,28 @@ export default function SearchResults({
 
               {activePreview.state === 'completado' && activePreview.path && (
                 <>
-                  <audio
-                    ref={audioRef}
-                    controls
-                    src={activePreview.savedPath
-                      ? storedFileStreamUrl('downloads', activePreview.savedPath)
-                      : `/api/preview/stream?path=${encodeURIComponent(activePreview.path)}`}
-                    className="mt-1 h-8 w-full"
-                  />
+                  <div className="mt-1 flex items-center gap-2">
+                    <audio
+                      ref={audioRef}
+                      controls
+                      src={activePreview.savedPath
+                        ? storedFileStreamUrl('downloads', activePreview.savedPath)
+                        : `/api/preview/stream?path=${encodeURIComponent(activePreview.path)}`}
+                      className="h-8 min-w-0 flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        audioRef.current?.pause()
+                        audioRef.current?.load()
+                      }}
+                      title="Recargar preview"
+                      aria-label="Recargar preview"
+                      className="shrink-0 rounded border border-[#2C303D] px-1.5 py-1 text-[#8D93A6] transition-colors hover:border-[#FFFFFF]/40 hover:text-[#E9EAF0]"
+                    >
+                      <RefreshCw size={11} />
+                    </button>
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {quickSaveLabel && !activePreview.savedPath && (
                       <button

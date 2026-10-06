@@ -8,15 +8,20 @@ from flask import Blueprint, jsonify, request
 
 from backend.database import (
     clear_url_history,
+    delete_playlist_snapshot,
+    get_metadata_value,
     get_output_folder_pref,
     load_last_playlist,
+    load_playlist_snapshot,
     load_search_cache,
     load_search_prefs,
     load_url_history,
     save_last_playlist,
+    save_playlist_snapshot,
     save_search_cache,
     save_search_prefs,
     save_url_history,
+    set_metadata_value,
     set_output_folder_pref,
 )
 
@@ -34,6 +39,38 @@ def create_blueprint(state: RuntimeState) -> Blueprint:
             return jsonify(load_last_playlist())
         data = request.get_json() or {}
         save_last_playlist(data)
+        return jsonify({"ok": True})
+
+    # ---- playlist tabs (pestañas abiertas) ----
+    @bp.route("/api/storage/playlist-tabs", methods=["GET", "PUT"])
+    def api_playlist_tabs():
+        if request.method == "GET":
+            data = get_metadata_value("playlist_tabs", None)
+            if not isinstance(data, dict):
+                data = {"tabs": [], "active": None}
+            return jsonify(data)
+        data = request.get_json() or {}
+        tabs = data.get("tabs", [])
+        if not isinstance(tabs, list):
+            tabs = []
+        set_metadata_value("playlist_tabs", {"tabs": tabs[:30], "active": data.get("active")})
+        return jsonify({"ok": True})
+
+    # ---- per-playlist snapshots (tracks de cada pestaña) ----
+    @bp.route("/api/storage/playlist-snapshot", methods=["GET", "PUT", "DELETE"])
+    def api_playlist_snapshot():
+        if request.method == "GET":
+            playlist_key = request.args.get("playlist_key", "")
+            return jsonify(load_playlist_snapshot(playlist_key))
+        if request.method == "DELETE":
+            playlist_key = request.args.get("playlist_key", "")
+            delete_playlist_snapshot(playlist_key)
+            return jsonify({"ok": True})
+        data = request.get_json() or {}
+        playlist_key = str(data.get("playlist_key", "")).strip()
+        if not playlist_key:
+            return jsonify({"error": "Falta playlist_key"}), 400
+        save_playlist_snapshot(playlist_key, data.get("snapshot") or {})
         return jsonify({"ok": True})
 
     # ---- url history ----

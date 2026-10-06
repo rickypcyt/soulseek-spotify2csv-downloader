@@ -52,6 +52,15 @@ export default function TrackCard({
   const downloaded = actualDownloaded || manuallyDownloaded || trackDownloads.some((download) => download.state === 'completado')
   const localCoverUrl = trackDownloads.find((download) => download.state === 'completado' && download.coverUrl)?.coverUrl
 
+  // Preview activo de Soulseek en los resultados de este track: no debe
+  // cortarse ni taparse cuando la descarga del track termina.
+  const hasActivePreview = Boolean(
+    search && (search.raw?.results || []).some((res) => {
+      const preview = previews[`${res.username}|${res.filename}`]
+      return preview && preview.state !== 'error'
+    })
+  )
+
   const hasDownloading = trackDownloads.some((download) => download.state === 'descargando')
   const hasQueued = trackDownloads.some((download) => download.state === 'encolando')
   const isSearching = Boolean(search && !search.raw?.isComplete)
@@ -179,7 +188,7 @@ export default function TrackCard({
         </div>
       )}
 
-      {!downloaded && (spotifyTrackId || t.spotify_preview) && (
+      {(!downloaded || hasActivePreview) && (spotifyTrackId || t.spotify_preview) && (
         <SpotifyEmbed
           trackId={spotifyTrackId}
           spotifyUrl={t.spotify_url}
@@ -253,7 +262,7 @@ export default function TrackCard({
           />
         </div>
       )}
-      {downloaded && (
+      {downloaded && !hasActivePreview && (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[#10121A]/70 p-4 text-center backdrop-blur-[2px] transition-[backdrop-filter] duration-200 group-hover:backdrop-blur-0">
           <div className="flex max-w-[90%] flex-col items-center gap-1.5">
             <p className="max-w-full truncate text-sm font-semibold text-[#E9EAF0]" title={t.track_name}>{t.track_name}</p>

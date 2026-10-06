@@ -71,10 +71,24 @@ export default function TrackList({
 
   const isIgnored = (t) => ignoredTracks.has(trackIdentity(t))
 
-  const indexed = tracks.map((t, i) => ({ track: t, index: i, downloaded: isDownloaded(t, i), ignored: isIgnored(t) }))
+  // Si el track tiene un preview sonando, se queda en pendientes aunque la
+  // descarga haya terminado: moverlo a "Descargadas" remontaría la card y
+  // cortaría el reproductor.
+  const hasActivePreview = (i) => {
+    const results = getTrackSearch(i)?.raw?.results || []
+    return results.some((res) => {
+      const preview = previews[`${res.username}|${res.filename}`]
+      return preview && preview.state !== 'error'
+    })
+  }
+
+  const indexed = tracks.map((t, i) => {
+    const downloaded = isDownloaded(t, i)
+    return { track: t, index: i, downloaded, ignored: isIgnored(t), pinned: downloaded && hasActivePreview(i) }
+  })
   const ignoredList = indexed.filter((item) => item.ignored && !item.downloaded)
-  const pendingTracks = indexed.filter((item) => !item.downloaded && !item.ignored)
-  const downloadedTracks = indexed.filter((item) => item.downloaded)
+  const pendingTracks = indexed.filter((item) => (!item.downloaded || item.pinned) && !item.ignored)
+  const downloadedTracks = indexed.filter((item) => item.downloaded && !item.pinned)
   const downloadedCount = downloadedTracks.length
   const ignoredCount = ignoredList.length
 
